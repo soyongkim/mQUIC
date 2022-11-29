@@ -16,7 +16,7 @@ It is recommended to prepare 2 of NICs to test handover between the NICs.
 
 To build mQUIC, you first download chromium source code.
 
-chromium source code can download below link.
+chromium source code can downloads below link.
 
 - https://chromium.googlesource.com/chromium/src/+/main/docs/linux/build_instructions.md
 
@@ -36,7 +36,7 @@ $ cd /path/to/chromium/src
 $ git clone https://github.com/soyongkim/mQUIC.git
 ```
 
-In quic_client, port_module.sh help to change original code to the modified code for mQUIC. also, back up the original file in net_backup folder.
+In quic_client, port_module.sh help to change original code to the modified code for mQUIC. also, it copies the original file in net_backup folder.
 
 ```bash
 $ cd mQUIC/quic_client
@@ -83,13 +83,13 @@ $ bash quic_server.sh
 
 ## Run QUIC client
 
-In quic_client, change*.sh and settings.yaml helps to make handover situation by modifying routing table.
+change*.sh and settings.yaml in quic_client helps to make handover situation by modifying routing table.
 
 Before run QUIC client, configure the settings.yaml.
 
-In iface1 and 2, it sets the interface information to use handover. and server's host sets ip address of the server's one.
+iface1 and iface2 sets the interface to use handover. and server sets ip address of the QUIC server. it doesn't need to change server's name.
 
-"Single" is used to test handover with only one wireless LAN card. it sets two ssid and password for using handover. 
+single is used to test handover with only one wireless LAN card. it sets two ssid and password for using handover. 
 
 ```yaml
 default:
@@ -113,7 +113,7 @@ default:
 
 To start the QUIC client, you can use quic_cm.sh and quic_nc.
 
-quic_cm.sh uses connection migration and quic_nc.sh run the QUIC establishes new connection when handover.
+quic_cm.sh uses connection migration and quic_nc.sh establishes new connection when handover.
 
 ```bash
 $ bash quic_cm.sh time 200 1 start1 1 1
@@ -142,7 +142,8 @@ If "start4" sets, handover occurs from ssid2 to ssid1.
 [number of testcases]: number of shellsctipt execution.
 ```
 
- *quic_cm.sh![image-20221128165309158](./.assets/image-20221128165309158.png)
+*quic_cm.sh
+ ![image-20221128165309158](./.assets/image-20221128165309158.png)
 
 *quic_nc.sh
 
