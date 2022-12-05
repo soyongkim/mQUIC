@@ -148,3 +148,19 @@ If "start4" sets, handover occurs from ssid2 to ssid1.
 
 ![image-20221128165514428](./.assets/image-20221128165514428.png)
 
+*measured data is recorded in "measure_delay.txt" after executing QUIC client.
+
+
+
+## Caution
+
+1. It should check the routing table first if there is any routing information for the interfaces that are not in use in handover.
+
+```bash
+$ route -n
+```
+
+2. When handover is performed more than twice, it is recommended to measure based on time.
+   - In the process of taking the psn from the connection, the process of initializing the existing information while requesting a new one may not work properly as it overlaps.
+
+3. Handover delay is not measured when more than two handovers are performed.

@@ -77,7 +77,7 @@ class QUIC_EXPORT_PRIVATE QuicClientBaseVisitorInterface {
     virtual ~QuicClientBaseVisitorInterface() {}
     
     // Called when network was unreachable.
-    virtual bool OnNetworkUnreachable() = 0;
+    virtual int OnNetworkUnreachable() = 0;
 };
 
 

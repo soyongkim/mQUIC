@@ -75,7 +75,7 @@ class QuicClientBase : public QuicClientBaseVisitorInterface
   virtual ~QuicClientBase();
 
   // QuicClientBaseVisitorInterface methods:
-  bool OnNetworkUnreachable() override;
+  int OnNetworkUnreachable() override;
 
   // Initializes the client to create a connection. Should be called exactly
   // once before calling StartConnect or Connect. Returns true if the
@@ -286,6 +286,7 @@ class QuicClientBase : public QuicClientBaseVisitorInterface
   }
     
   int ho_count = 0;
+  uint64_t last_psn = 0;
   uint64_t nc_start_;
 
  protected:

@@ -170,112 +170,96 @@ QuicIpAddress IfaceToIp(std::string iface) {
   return ip;
 }
 
+// routing table search
+int QuicClientBase::OnNetworkUnreachable() {
+  // Find my new path address
+  FILE* rt_fp;
+  in_addr gway;
+  in_addr_t dest, mask;
+  int flags, refcnt, use, metric, mtu, win, irtt;
+  char new_iface[64];
+  QuicIpAddress newIP, newGateway;
+
+  newIP = QuicIpAddress();
+  newGateway = QuicIpAddress();
+
+  //std::cout << "[quic_toy_client] Searching... - " << timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
+  uint64_t search_start = timeStamp();
+  while(timeStamp() - search_start < 10) {
+    if((rt_fp = fopen("/proc/net/route", "r")) == NULL) {
+        perror("file open error");
+        return false;
+      }
+
+      if (fscanf(rt_fp, "%*[^\n]\n") < 0) {
+          fclose(rt_fp);
+          return false;
+      }
+
+      int nread = fscanf(rt_fp, "%63s%X%X%X%d%d%d%X%d%d%d\n",
+                        new_iface, &dest, &gway.s_addr, &flags, &refcnt, &use, &metric, &mask,
+                        &mtu, &win, &irtt);
+      if (nread != 11) {
+          break;
+      }
+      fclose(rt_fp);
+
+      if ((flags & (RTF_UP|RTF_GATEWAY)) == (RTF_UP|RTF_GATEWAY) && dest == 0) {
+        // found new path address
+        newIP = QuicIpAddress(IfaceToIp(std::string(new_iface)));
+        newGateway = QuicIpAddress(gway);
+        if(newGateway != current_path_gateway_) {
+          break;
+        }
+      }
+  }
+
+  if(newGateway.ToString() == "") {
+    std::cout << "[quic_client_base] There is no avaliable path" << std::endl;
+    return 0;
+  }
+
+  if(!current_path_gateway_.IsInitialized()) {
+    std::cout << "[quic_client_base] set current path gateway with ip" << std::endl;
+    current_path_gateway_ = newGateway;
+    current_path_ip_ = newIP;
+    return 0;
+  }
+
+  if(newGateway == current_path_gateway_) {
+    std::cout << "[quic_client_base] Same Gateway, so check IP. new: " << newGateway << " / cur: " << current_path_gateway_ << std::endl;
+
+    if(newIP == current_path_ip_) {
+      std::cout << "[quic_client_base] Not Changed IP new: " << newGateway << " / cur: " << current_path_gateway_ << std::endl;
+      return 1;
+    }
+  }
+
+  if(!connected()) {
+    return 0;
+  }
+
+  std::cout << "[quic_client_base] Detected network change and Start connection migration to " << new_iface << " - " << timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
+  // [SD] migration start
+  current_path_gateway_ = newGateway;
+  current_path_ip_ = newIP;
+  std::cout << "[quic_client_base] validate and migration - " << 
+      timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
+    //ValidateAndMigrateSocket(QuicIpAddress::Any4());
+  ValidateAndMigrateSocket(newIP);
+  return 2;
+}
+
 // bool QuicClientBase::OnNetworkUnreachable() {
-//   // Find my new path address
-//   FILE* rt_fp;
-//   in_addr gway;
-//   in_addr_t dest, mask;
-//   int flags, refcnt, use, metric, mtu, win, irtt;
-//   char new_iface[64];
-//   QuicIpAddress newIP, newGateway;
-
-//   newIP = QuicIpAddress();
-//   newGateway = QuicIpAddress();
-
-//   //std::cout << "[quic_toy_client] Searching... - " << timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
-//   uint64_t search_start = timeStamp();
-//   while(timeStamp() - search_start < 10) {
-//     if((rt_fp = fopen("/proc/net/route", "r")) == NULL) {
-//         perror("file open error");
-//         return false;
-//       }
-
-//       if (fscanf(rt_fp, "%*[^\n]\n") < 0) {
-//           fclose(rt_fp);
-//           return false;
-//       }
-
-//       // 첫번째만 하도록 하고
-//       // for (int i=0;i<1;i++) {
-//         int nread = fscanf(rt_fp, "%63s%X%X%X%d%d%d%X%d%d%d\n",
-//                           new_iface, &dest, &gway.s_addr, &flags, &refcnt, &use, &metric, &mask,
-//                           &mtu, &win, &irtt);
-//         if (nread != 11) {
-//             break;
-//         }
-//         fclose(rt_fp);
-
-//         if ((flags & (RTF_UP|RTF_GATEWAY)) == (RTF_UP|RTF_GATEWAY) && dest == 0) {
-//           // found new path address
-//           newIP = QuicIpAddress(IfaceToIp(std::string(new_iface)));
-//           newGateway = QuicIpAddress(gway);
-//           if(newGateway != current_path_gateway_) {
-//             break;
-//           }
-//         }
-//       //}
-//   }
-
-//   if(newGateway.ToString() == "") {
-//     std::cout << "[quic_client_base] Not found new path" << std::endl;
-//     return false;
-//   }
-
-//   if(!current_path_gateway_.IsInitialized()) {
-//     std::cout << "[quic_client_base] Set current path gateway" << std::endl;
-//     current_path_gateway_ = newGateway;
-//     current_path_ip_ = newIP;
-//     return false;
-//   }
-
-//   if(newGateway == current_path_gateway_) {
-//     std::cout << "[quic_client_base] Same Gateway, so check IP. new: " << newGateway << " / cur: " << current_path_gateway_ << std::endl;
-
-//     if(newIP == current_path_ip_) {
-//       std::cout << "[quic_client_base] Not Changed IP new: " << newGateway << " / cur: " << current_path_gateway_ << std::endl;
-//       return false;
-//     }
-//   }
-
 //   if(!connected()) {
 //     return false;
 //   }
 
-//   std::cout << "[quic_client_base] Detected network change and Start connection migration to " << new_iface << " - " << timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
 //   // [SD] migration start
-//   current_path_gateway_ = newGateway;
-//   current_path_ip_ = newIP;
-//   if(IsSetValidateFirst()) {
-//     std::cout << "[quic_client_base] validate and migration - " << 
-//       timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
-//     //ValidateAndMigrateSocket(QuicIpAddress::Any4());
-//     ValidateAndMigrateSocket(newIP);
-//   } else if(IsSetAckFirst()) {
-//     std::cout << "[quic_client_base] migration and send ack" << std::endl;
-//     MigrateSocket(newIP);
-//     //std::cout << "[quic_client_base] send ack first" << std::endl;
-//     if(session()->connection()->GetMigrationState()) {
-//       session()->connection()->SendAckNow();
-//       session()->connection()->SetMigrationState(false);
-//     }
-//   } else {
-//     std::cout << "[quic_client_base] just migration" << std::endl;
-//     MigrateSocket(newIP);
-//   }
-
-//   return true;
+//   std::cout << "[quic_client_base] validate and migration - " << 
+//     timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
+//   return ValidateAndMigrateSocket(QuicIpAddress::Any4());
 // }
-
-bool QuicClientBase::OnNetworkUnreachable() {
-  if(!connected()) {
-    return false;
-  }
-
-  // [SD] migration start
-  std::cout << "[quic_client_base] validate and migration - " << 
-    timeStamp() - session()->connection()->GetHandoverStart() << " msec" << std::endl;
-  return ValidateAndMigrateSocket(QuicIpAddress::Any4());
-}
 
 bool QuicClientBase::Initialize() {
   num_sent_client_hellos_ = 0;
@@ -372,7 +356,7 @@ void QuicClientBase::StartConnect() {
   // [SD] register client base visitor
   session()->connection()->set_client_base_visitor(this);
   // [SD] set current default gateway
-  // OnNetworkUnreachable();
+  OnNetworkUnreachable();
   // Reset |writer()| after |session()| so that the old writer outlives the old
   // session.
   set_writer(writer);

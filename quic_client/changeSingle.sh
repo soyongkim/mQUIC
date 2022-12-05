@@ -1,5 +1,5 @@
 #!/bin/bash
-YAML=chromium_quic_handover/quic_client/settings.yaml ENV=default source chromium_quic_handover/quic_client/parse_yaml.sh
+YAML=mQUIC/quic_client/settings.yaml ENV=default source mQUIC/quic_client/parse_yaml.sh
 # iface1 : wlan0 / iface2: usb0
 echo "$single_ssid1/$single_pass1 : $single_ssid2/$single_pass2" 
 start=`date +%s.%N`

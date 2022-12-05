@@ -194,8 +194,15 @@ class FastRoutingTableSearchAlarmDelegate
       QUICHE_DCHECK(connection_->connected());
       std::cout << "[quic_connection] HD timeout - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
       std::fstream writer;
-      if(!connection_->OnNetworkUnrearchable()) {
+      writer.open("measure_delay.txt", std::ios::app);
+      writer << "HD Timeout\t";
+      writer.close();
+
+      int res = connection_->OnNetworkUnrearchable();
+      if(res == 0) {
         connection_->SetCloseTimer();
+      } else if(res == 1) {
+        connection_->SetFastTimer();
       }
     }
 };
@@ -209,7 +216,7 @@ class CloseRoutingTableSearchAlarmDelegate
     void OnAlarm() override {
       QUICHE_DCHECK(connection_->connected());
       std::cout << "[quic_connection] Close timeout - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
-      
+
       if(!connection_->OnNetworkUnrearchable()) {
         if(!connection_->IsCloseCountZero()) {
           std::cout << "[quic_connection] close count down and Set close timer again" << std::endl;
@@ -413,7 +420,7 @@ QuicConnection::QuicConnection(
   packet_creator_.SetDefaultPeerAddress(initial_peer_address);
 
   // [SD] close count
-  init_close_rt_count = 12;
+  init_close_rt_count = 5;
   close_rt_count = init_close_rt_count;
 }
 
@@ -1145,10 +1152,9 @@ bool QuicConnection::OnUnauthenticatedHeader(const QuicPacketHeader& header) {
 
   if (packet_creator_.HasPendingFrames()) {
 
-    if(cb_visitor_->OnNetworkUnreachable()) {
-      std::cout << "[quic_connection] new error but keep going..." << std::endl;
-      return true;
-    }
+    // if(cb_visitor_->OnNetworkUnreachable()) {
+    //   return true;
+    // }
 
     // Incoming packets may change a queued ACK frame.
     const std::string error_details =
@@ -1438,14 +1444,14 @@ bool QuicConnection::OnStreamFrame(const QuicStreamFrame& frame) {
   if(first_try) {
     //std::cout << "[quic_connection] first try" << std::endl;
     checkAddress = last_received_packet_info_.destination_address;
-    first_rcv_ = timeStamp();
+    //first_rcv_ = timeStamp();
     first_try = false;
   }
 
   if(checkAddress.host() == last_received_packet_info_.destination_address.host()) {
     //if(!cm_state_)
     //  std::cout << "[quic_connection] stream(" << timeStamp() - ho_start_ << "msec)... - default: " << default_path_.self_address << " last_packet: " << last_received_packet_info_.destination_address << std::endl;
-    if(ho_delay_ == 0)
+    //if(ho_delay_ == 0)
       ho_start_ = timeStamp();
 
     // if(checkAddress.port() != last_received_packet_info_.destination_address.port()) {
@@ -1458,6 +1464,7 @@ bool QuicConnection::OnStreamFrame(const QuicStreamFrame& frame) {
     //ho_start_ = timeStamp();
 
     //std::fstream writer;
+    fast_rt_search_alarm_->Cancel();
     std::cout << "[quic_connection] Received stream frame after HO from "<< checkAddress.host() << " to " << last_received_packet_info_.destination_address.host() << ", Handover Delay : " << ho_delay_ <<  " ms" << std::endl;
     // writer.open("ho_data.txt", std::ios::app);
     // writer << ho_delay_ << std::endl;
@@ -1919,7 +1926,7 @@ bool QuicConnection::OnPathResponseFrame(const QuicPathResponseFrame& frame) {
   MaybeUpdateAckTimeout();
   if (use_path_validator_) {
     QUIC_RELOADABLE_FLAG_COUNT_N(quic_pass_path_response_to_validator, 1, 4);
-    std::cout << "[quic_connection] validate" << std::endl;
+    //std::cout << "[quic_connection] validate" << std::endl;
     path_validator_.OnPathResponse(
         frame.data_buffer, last_received_packet_info_.destination_address);
   } else {
@@ -2970,12 +2977,11 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   // RT search timer
   // In proposed scheme, update timer
   if(active_cm_) {
-    //fast_rt_search_alarm_->Update(clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay()*3, kAlarmGranularity);
-    doute_network_unreachable_ = false;
-    // if(close_rt_search_alarm_->IsSet()) {
-    //   close_rt_search_alarm_->Cancel();
-    //   close_rt_count = init_close_rt_count;
-    // }
+    fast_rt_search_alarm_->Update(clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay()*3, kAlarmGranularity);
+    if(close_rt_search_alarm_->IsSet()) {
+      close_rt_search_alarm_->Cancel();
+      close_rt_count = init_close_rt_count;
+    }
   }
 
   //std::cout << "[quic_connection] received udp " << "(" << timeStamp() - ho_start_ << "msec)" << std::endl;
@@ -3892,16 +3898,15 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
   if (IsWriteError(result.status)) {
     // [SD] Ignore network unreachable error
     if(result.error_code == 101 && active_cm_ == true) {
-      std::cout << "[quic_connection] network unreachable but, keep operating" << std::endl;
+      std::cout << "[quic_connection] network unreachable but, keep operating - (" << timeStamp() - ho_start_ << " msec" << ")" <<  std::endl;
       if(watcher_ == true)
         return true;
 
-      if(!cb_visitor_->OnNetworkUnreachable()) {
+      if(cb_visitor_->OnNetworkUnreachable() != 2) {
         pending_packets_.push_back(CopySerializedPacket(*packet, helper_->GetStreamSendBufferAllocator(), false));
 
         if(!close_rt_search_alarm_->IsSet() && close_rt_count == init_close_rt_count) {
           std::cout << "[quic_connection] Set close rt search alarm because network is unreachable " << std::endl;
-          DouteNetworkIsUnreachable();
           close_rt_search_alarm_->Set(clock_->ApproximateNow() + QuicTime::Delta::FromMilliseconds(1000));
         }
       }
@@ -4513,7 +4518,7 @@ void QuicConnection::OnRetransmissionTimeout() {
   //   return;
   // }
 
-  std::cout << "[quic_connection] ret timeout" << std::endl;
+  //std::cout << "[quic_connection] ret timeout" << std::endl;
   QuicPacketNumber previous_created_packet_number =
       packet_creator_.packet_number();
   const auto retransmission_mode =
@@ -4540,7 +4545,7 @@ void QuicConnection::OnRetransmissionTimeout() {
       blackhole_detector_.IsDetectionInProgress()) {
     // Stop detection in quiescence.
     QUICHE_DCHECK_EQ(QuicSentPacketManager::LOSS_MODE, retransmission_mode);
-    std::cout << "[quic_connection] Stop detection - ret time out" << std::endl;
+    //std::cout << "[quic_connection] Stop detection - ret time out" << std::endl;
     blackhole_detector_.StopDetection(/*permanent=*/false);
   }
   //std::cout << "[quic_connection] prev packet number : " << previous_created_packet_number << std::endl;
@@ -4555,7 +4560,7 @@ void QuicConnection::OnRetransmissionTimeout() {
   // In the PTO and TLP cases, the SentPacketManager gives the connection the
   // opportunity to send new data before retransmitting.
   if (sent_packet_manager_.pto_enabled()) {
-    std::cout << "[quic_connection] Retransmittable packet set - ret time out" << std::endl;
+    //std::cout << "[quic_connection] Retransmittable packet set - ret time out" << std::endl;
     sent_packet_manager_.MaybeSendProbePackets();
   } else if (sent_packet_manager_.MaybeRetransmitTailLossProbe()) {
     // Send the pending retransmission now that it's been queued.
@@ -4624,7 +4629,7 @@ void QuicConnection::OnRetransmissionTimeout() {
   // This happens if the loss algorithm invokes a timer based loss, but the
   // packet doesn't need to be retransmitted.
   if (!HasQueuedData() && !retransmission_alarm_->IsSet()) {
-    std::cout << "[quic_connection] set ret timer again" << std::endl;
+    //std::cout << "[quic_connection] set ret timer again" << std::endl;
     SetRetransmissionAlarm();
   }
 }
@@ -6845,7 +6850,7 @@ void QuicConnection::OnPeerIssuedConnectionIdRetired() {
   QUICHE_DCHECK(!retired_cid_sequence_numbers.empty());
   for (const auto& sequence_number : retired_cid_sequence_numbers) {
     ++stats_.num_retire_connection_id_sent;
-    std::cout << "[quic_connection] Send RETIRE_CONNECTION_ID - me: " << default_path_.self_address << " [" << connection_id() << "]" <<  "(" << timeStamp() - ho_start_ << "msec)" <<  std::endl;
+    //std::cout << "[quic_connection] Send RETIRE_CONNECTION_ID - me: " << default_path_.self_address << " [" << connection_id() << "]" <<  "(" << timeStamp() - ho_start_ << "msec)" <<  std::endl;
     visitor_->SendRetireConnectionId(sequence_number);
   }
 }
@@ -7115,7 +7120,7 @@ bool QuicConnection::SendPathResponse(
       last_received_packet_info_.destination_address) {
     // The PATH_CHALLENGE is received on the default socket. Respond on the same
     // socket.
-    std::cout << "[quic_connection] Received PC on the default socket so, Send PATH RESPONSE frame from " << default_path_.self_address << " to " << peer_address_to_send << "(" << timeStamp() - ho_start_ << "msec)" << std::endl;
+    std::cout << "[quic_connection] Default path - Send PATH RESPONSE frame from " << default_path_.self_address << " to " << peer_address_to_send << "(" << timeStamp() - ho_start_ << "msec)" << std::endl;
     return packet_creator_.AddPathResponseFrame(data_buffer);
   }
 
@@ -7142,7 +7147,7 @@ bool QuicConnection::SendPathResponse(
   // Ignore the return value to treat write error on the alternative writer as
   // part of network error. If the writer becomes blocked, wait for the peer to
   // send another PATH_CHALLENGE.
-  std::cout << "[quic_connection] - Alternative Path : Send PATH RESPONSE frame to " << peer_address_to_send << " last me: " << last_received_packet_info_.destination_address <<  "(" << timeStamp() - ho_start_ << "msec)"  << std::endl;
+  std::cout << "[quic_connection] Alternative Path - Send PATH RESPONSE frame to " << peer_address_to_send << " last me: " << last_received_packet_info_.destination_address <<  "(" << timeStamp() - ho_start_ << "msec)"  << std::endl;
   WritePacketUsingWriter(std::move(probing_packet), writer,
                          last_received_packet_info_.destination_address,
                          peer_address_to_send,

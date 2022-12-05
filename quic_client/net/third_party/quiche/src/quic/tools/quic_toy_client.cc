@@ -361,10 +361,19 @@ void NetworkChange(std::shared_ptr<QuicClientBase> client, NetworkChangeConfig c
   // [SD] wait for established connection
   while(!client->session()->connection()->IsHandshakeConfirmed());
 
+  uint64_t cur_psn;
   for(int i=0; i<conf.ho_num; i++) {
     if(conf.ho_case == "psn") {
+      cur_psn = client->session()->connection()->ack_frame().largest_acked.ToUint64();
+      if(cur_psn < client->last_psn) {
+        cur_psn += client->last_psn;
+      }
       // [SD] handover occur based on received packet number
-      while(client->session()->connection()->ack_frame().largest_acked < QuicPacketNumber(conf.ho_interval*(i+1)));
+      while(cur_psn < (uint64_t)conf.ho_interval*(i+1)) {
+        cur_psn = client->session()->connection()->ack_frame().largest_acked.ToUint64() + client->last_psn;
+      }
+
+      client->last_psn = cur_psn;
     } else {
       // [SD] handover occur based on time (msec)
       // srand((unsigned int)time(NULL));
@@ -373,24 +382,36 @@ void NetworkChange(std::shared_ptr<QuicClientBase> client, NetworkChangeConfig c
        std::this_thread::sleep_for(std::chrono::milliseconds(conf.ho_interval));
     }
 
-    uint64_t start_psn = client->session()->connection()->ack_frame().largest_acked.ToUint64();
-    client->session()->connection()->SetStartPsn(start_psn);
+    if(conf.ho_case == "psn") {
+      client->session()->connection()->SetStartPsn(cur_psn);
+    } else {
+      cur_psn = client->session()->connection()->ack_frame().largest_acked.ToUint64();
+    }
 
-    std::cout << "[quic_toy_client] Start Network Change(" << start_psn << ") : " << client->timeStamp() - start_ << " msec" << std::endl;
+    std::cout << "[quic_toy_client] Start Network Change(" << cur_psn << ") : " << client->timeStamp() - start_ << " msec" << std::endl;
     client->nc_start_ = client->timeStamp();
 
+    std::string cmd;
     switch (conf.start_iface) {
     case 1:
-      system("bash change1to2.sh");
+      std::cout << "[quic_toy_client] iface1 -> iface2" << std::endl;
+      cmd.append("bash mQUIC/quic_client/change1to2.sh ");
+      cmd.append(std::to_string(150+(i*10)));
+      std::cout << cmd << std::endl;
+      system(cmd.c_str());
       break;
     case 2:
-      system("bash change2to1.sh");
+      std::cout << "[quic_toy_client] iface2 -> iface1" << std::endl;
+      cmd.append("bash mQUIC/quic_client/change2to1.sh ");
+      cmd.append(std::to_string(150+(i*10)));
+      std::cout << cmd << std::endl;
+      system(cmd.c_str());
       break;
     case 3:
-      system("bash changeHorison.sh 1");
+      system("bash mQUIC/quic_client/changeHorison.sh 1");
       break;
     case 4:
-      system("bash changeHorison.sh 2");
+      system("bash mQUIC/quic_client/changeHorison.sh 2");
       break;
     }
 
