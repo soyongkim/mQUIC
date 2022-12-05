@@ -113,7 +113,7 @@ default:
 
 To start the QUIC client, you can use quic_cm.sh and quic_nc.
 
-quic_cm.sh uses connection migration and quic_nc.sh establishes new connection when handover.
+quic_cm.sh uses connection migration and quic_nc.sh establishes new connection when handover occurs.
 
 ```bash
 $ bash quic_cm.sh time 200 1 start1 1 1
