@@ -165,3 +165,5 @@ $ route -n
    - In the process of taking the psn from the connection, the process of initializing the existing information while requesting a new one may not work properly as it overlaps.
 
 3. Handover delay is not measured when more than two handovers are performed.
+
+4. It is added to Closer timer for handover.
