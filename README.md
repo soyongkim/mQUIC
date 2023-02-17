@@ -24,7 +24,7 @@ To build mQUIC, you need to first obtain the Chromium source code. You can downl
 
 - https://chromium.googlesource.com/chromium/src/+/main/docs/linux/build_instructions.md
 
-If you have completed the "Get the Code" step, depot_tools will be installed and the Chromium code will be downloaded. However, since the Chromium code is continually being modified, building the mQUIC implementation using the latest Chromium code may fail. Therefore, to return to the Chromium version used for mQUIC implementation, revert the code to the following commit point.
+If you have completed the "Run the hooks" step, depot_tools will be installed and the Chromium code will be downloaded. However, since the Chromium code is continually being modified, building the mQUIC implementation using the latest Chromium code may fail. Therefore, to return to the Chromium version used for mQUIC implementation, revert the code to the following commit point.
 
 ```bash
 $ git checkout c91b87056
@@ -45,10 +45,11 @@ $ cd mQUIC
 $ bash port_module.sh
 ```
 
-After porting the code, a net_backup folder is created, which contains copied original Chromium code. Now, you can build Chromium with mQUIC. The build is performed using the ninja build tool, and the out/Default folder is created through the -C option, under which the QUIC client and server will be built.
+After porting the code, a net_backup folder is created, which contains copied original Chromium code. Now, you can build Chromium with mQUIC. If Chromium had been installed, the gn tool would have been installed together. This is a meta-build system for generating ninja build files. First, ninja build files are generated with the gn tool. Then, mQUIC client and server are built with the ninja build tool.
 
 ```bash
 $ cd /path/to/chromium/src
+$ gn gen out/Default
 $ ninja -C out/Default epoll_quic_client epoll_quic_server
 ```
 
