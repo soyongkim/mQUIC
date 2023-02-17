@@ -125,7 +125,7 @@ bool QuicClientEpollNetworkHelper::CreateUDPSocketAndBind(
   socklen_t slen = sizeof(testaddr);
   memset(&testaddr, 0 ,sizeof(testaddr));
   getsockname(fd, (struct sockaddr*)&testaddr, &slen);
-  std::cout << "[quic_client_epoll_network_helper] Client address: " << inet_ntoa(testaddr.sin_addr) << std::endl;
+  //std::cout << "[quic_client_epoll_network_helper] Client address: " << inet_ntoa(testaddr.sin_addr) << std::endl;
     
   return true;
 }

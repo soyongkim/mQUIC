@@ -41,6 +41,7 @@ class QuicToyClient {
   // .cc file, sends requests and prints the responses. Returns 0 on success
   // and non-zero otherwise.
   int SendRequestsAndPrintResponses(std::vector<std::string> urls);
+  int SendRequests(std::vector<std::string> urls);
 
  private:
   ClientFactory* client_factory_;  // Unowned.

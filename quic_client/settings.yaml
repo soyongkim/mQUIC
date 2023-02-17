@@ -1,17 +1,17 @@
 default:
   iface1:
-    name: "wlan0"
-    host: 192.168.93.13
-    gateway: 192.168.93.1
+    name: "wlanx"
+    host: 0.0.0.0
+    gateway: 0.0.0.0
   iface2:
-    name: "wlan1"
-    host: 192.168.34.50
-    gateway: 192.168.34.1
+    name: "wlany"
+    host: 0.0.0.0
+    gateway: 0.0.0.0
   server:
     name: "quic.smalldragon.net"
-    host: 155.230.34.235
+    host: 0.0.0.0
   single:
-    ssid1: "SD-WiFi"
-    pass1: "thdyd324!"
-    ssid2: "SD-WiFi-ATC-5G"
-    pass2: "thdyd324"
+    ssid1: "ssid1"
+    pass1: "password1"
+    ssid2: "ssid2"
+    pass2: "password2"

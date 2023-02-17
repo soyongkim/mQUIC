@@ -592,10 +592,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // writes to happen.
   void OnBlockedWriterCanWrite() override;
 
-  
-
-
-
   bool IsWriterBlocked() const override {
     return writer_ != nullptr && writer_->IsWriteBlocked();
   }
@@ -654,20 +650,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     return preAck;
   }
 
-  void CloseCountDown() {
-    close_rt_count--;
-  }
-
-  void SetCloseTimer() {
-    if(!close_rt_search_alarm_->IsSet()) {
-      std::cout << "[quic_connection] Set close rt search alarm because fast timer is expired " << std::endl;
-      close_rt_search_alarm_->Set(clock_->ApproximateNow() + QuicTime::Delta::FromMilliseconds(1000));
-    }
-  }
-
-  bool IsCloseCountZero() {
-    return close_rt_count == 0 ? true : false;
-  }
 
   void SetFastTimer() {
     if(!fast_rt_search_alarm_->IsSet()) {
@@ -717,11 +699,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     searching_deadline = 0;
   }
 
-  void InitRoutingTableSearchTimer() {
-    fast_rt_search_alarm_->Cancel();
-    close_rt_search_alarm_->Cancel();
-  }
-
   void SetHandoverState(bool ho_state) {
     ho_state_ = ho_state;
   }
@@ -758,7 +735,13 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     return network_unreachable_;
   }
 
-  int measure_nc_ = 0;
+  int mquic_cwnd_size = 0;
+  int tlu_ex_factor;
+  int init_lookup_interval;
+  int counting_rt = 0;
+
+  void UpdateTimerLookup();
+  void InitTimerLookup();
 
   // From QuicFramerVisitorInterface
   void OnError(QuicFramer* framer) override;
@@ -877,7 +860,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     cb_visitor_ = cb_visitor;
   }
 
-  bool OnNetworkUnrearchable() {
+  int OnNetworkUnrearchable() {
+    counting_rt++;
     return cb_visitor_->OnNetworkUnreachable();
   }
 
@@ -2458,9 +2442,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   double pre_bw_ = 0;
   uint64_t maxWindow, maxRet;
   bool window_flag = true;
-  int close_rt_count;
-  int init_close_rt_count;
   bool doute_network_unreachable_ = false;
+
 
   std::vector<SerializedPacket*> pending_packets_;
 };

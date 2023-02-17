@@ -60,7 +60,7 @@ void QuicPathValidator::OnPathResponse(const QuicPathFrameBuffer& probing_data,
   // This iterates at most 3 times.
   if (std::find(probing_data_.begin(), probing_data_.end(), probing_data) !=
       probing_data_.end()) {
-    std::cout << "[quic_path_validator] Path Validation Success!" << std::endl;
+    //std::cout << "[quic_path_validator] Path Validation Success!" << std::endl;
     result_delegate_->OnPathValidationSuccess(std::move(path_context_));
     ResetPathValidation();
   } else {

@@ -341,7 +341,7 @@ uint64_t start_, end_;
 
 void Tracker(std::shared_ptr<QuicClientBase> client, int* thread_kill) {
   while(!client->session()->connection()->IsHandshakeComplete());
-  std::cout << "[quic_toy_client] tracker operating..." << std::endl;
+  //std::cout << "[quic_toy_client] tracker operating..." << std::endl;
 
   std::fstream writer;
   writer.open("ho_track.txt", std::ios::app);
@@ -376,10 +376,10 @@ void NetworkChange(std::shared_ptr<QuicClientBase> client, NetworkChangeConfig c
       client->last_psn = cur_psn;
     } else {
       // [SD] handover occur based on time (msec)
-      // srand((unsigned int)time(NULL));
-      // int rand_interval = (conf.ho_interval-50) + (int)rand()%101;
-      // std::this_thread::sleep_for(std::chrono::milliseconds(rand_interval));
-       std::this_thread::sleep_for(std::chrono::milliseconds(conf.ho_interval));
+      srand((unsigned int)time(NULL));
+      int rand_interval = (conf.ho_interval-50) + (int)rand()%101;
+      std::this_thread::sleep_for(std::chrono::milliseconds(rand_interval));
+      //std::this_thread::sleep_for(std::chrono::milliseconds(conf.ho_interval));
     }
 
     if(conf.ho_case == "psn") {
@@ -388,23 +388,23 @@ void NetworkChange(std::shared_ptr<QuicClientBase> client, NetworkChangeConfig c
       cur_psn = client->session()->connection()->ack_frame().largest_acked.ToUint64();
     }
 
-    std::cout << "[quic_toy_client] Start Network Change(" << cur_psn << ") : " << client->timeStamp() - start_ << " msec" << std::endl;
+    std::cout << "[quic_toy_client] Start handover after " << client->timeStamp() - start_ << " msec from request start" << std::endl;
     client->nc_start_ = client->timeStamp();
 
     std::string cmd;
     switch (conf.start_iface) {
     case 1:
-      std::cout << "[quic_toy_client] iface1 -> iface2" << std::endl;
+      //std::cout << "[quic_toy_client] iface1 -> iface2" << std::endl;
       cmd.append("bash mQUIC/quic_client/change1to2.sh ");
       cmd.append(std::to_string(150+(i*10)));
-      std::cout << cmd << std::endl;
+      //std::cout << cmd << std::endl;
       system(cmd.c_str());
       break;
     case 2:
-      std::cout << "[quic_toy_client] iface2 -> iface1" << std::endl;
+      //std::cout << "[quic_toy_client] iface2 -> iface1" << std::endl;
       cmd.append("bash mQUIC/quic_client/change2to1.sh ");
       cmd.append(std::to_string(150+(i*10)));
-      std::cout << cmd << std::endl;
+      //std::cout << cmd << std::endl;
       system(cmd.c_str());
       break;
     case 3:
@@ -422,7 +422,32 @@ void NetworkChange(std::shared_ptr<QuicClientBase> client, NetworkChangeConfig c
         conf.start_iface = 1;
     }
   }
-  std::cout << "[quic_toy_client] network changer terminate... - " << client->timeStamp() - client->nc_start_ << " msec" << std::endl;
+}
+
+
+int init_lookup_interval = 50;
+int tlu_ex_factor = 0;
+int64_t UpdateTimerLookupForNormalQUIC() {
+  int lookup_interval;
+  
+  lookup_interval = (1 << tlu_ex_factor)*(init_lookup_interval);
+  tlu_ex_factor++;
+  std::cout << "[quic_toy_client] " << lookup_interval << "/" << tlu_ex_factor << std::endl;
+
+  if(lookup_interval > 10000) {
+    // Deadline
+    return -1;
+  }
+  
+  return lookup_interval;
+}
+
+int QuicToyClient::SendRequests(std::vector<std::string> urls) {
+  int32_t num_requests(GetQuicFlag(FLAGS_num_requests));
+  for(int i=0; i<num_requests; i++) {
+    SendRequestsAndPrintResponses(urls);
+  }
+  return 0;
 }
 
 int QuicToyClient::SendRequestsAndPrintResponses(
@@ -470,7 +495,7 @@ int QuicToyClient::SendRequestsAndPrintResponses(
   }
 
   // [SD] Default: const int32_t num_requests
-  int32_t num_requests(GetQuicFlag(FLAGS_num_requests));
+  //int32_t num_requests(GetQuicFlag(FLAGS_num_requests));
   std::unique_ptr<quic::ProofVerifier> proof_verifier;
   if (GetQuicFlag(FLAGS_disable_certificate_verification)) {
     proof_verifier = std::make_unique<FakeProofVerifier>();
@@ -639,7 +664,6 @@ int QuicToyClient::SendRequestsAndPrintResponses(
     networkChangeThread = std::thread(NetworkChange, client, NetworkChangeConfig(ho_num, ho_interval, start_iface, GetQuicFlag(FLAGS_ho_case)));
   }
 
-  total_success = 0;
   start_ = client->timeStamp();
   client->session()->connection()->SetStartTimeFramer(start_);
 
@@ -649,8 +673,11 @@ int QuicToyClient::SendRequestsAndPrintResponses(
     trackerThread.detach();
   }
 
-  for (int i = 0; i < num_requests; ++i) {
-    std::cout << "[quic_toy_client] Start to send a Request (" << i << ")" << std::endl;
+  int cur_num_req = 1;
+  ho_start = ho_delay = total_success = 0;
+  bool cm_enable = GetQuicFlag(FLAGS_enable_cm);
+  for (int i = 0; i < cur_num_req; ++i) {
+    std::cout << "[quic_toy_client] Start request (" << i+1 << ")" << std::endl;
     client->SendRequestAndWaitForResponse(header_block, body, /*fin=*/true);
 
     // Print request and response details.
@@ -698,38 +725,93 @@ int QuicToyClient::SendRequestsAndPrintResponses(
 
       std::cout << "[quic_toy_client] error code : " << client->session()->error() << std::endl;
 
-      if(!GetQuicFlag(FLAGS_enable_cm)) {
-        ho_start = client->session()->connection()->GetHandoverStart();
-        preLa = client->session()->connection()->GetLargestReceivedPacket().ToUint64();
-        // 처리 new connection 만들어서 처리하는 코드
-        if(client->session()->error() == 27 || client->session()->error() == 16) {
-          client->Disconnect();
-          std::cout << "[quic_toy_client] network unreachable, so request again" << std::endl;
-          num_requests++;
+      // if(client->session()->error() == 85) {
+      //   std::cout << "[quic_toy_client] RTOS error, requesta again" << std::endl;
+      //   client->Disconnect();
+
+      //   if (!client->Initialize()) {
+      //     std::cerr << "Failed to reinitialize client between requests."
+      //               << std::endl;
+      //     return 1;
+      //   }
+
+      //   if (!client->Connect()) {
+      //     std::cerr << "Failed to reconnect client between requests."
+      //                         << std::endl;
+      //     return 1;
+      //   }
+      //   cur_num_req++;
+      //   continue;
+      // }
+
+      ho_start = client->session()->connection()->GetHandoverStart();
+      preLa = client->session()->connection()->GetLargestReceivedPacket().ToUint64();
+
+      if(cm_enable) {
+
+        if(client->session()->error() == 85) {
+          std::cout << "[quic_toy_client] RTOS error" << std::endl;
+          return 1;
+        }
+
+        tlu_ex_factor = client->session()->connection()->tlu_ex_factor;
+        cm_enable = !cm_enable;
+
+        std::cout << "[quic_toy_client] ex: " << tlu_ex_factor << std::endl;
+      }
+
+      //std::cout << "[quic_toy_client] ho_start time: " << ho_start << std::endl;
+      if(client->session()->error() == 27 || client->session()->error() == 16 || client->session()->error() == 85) {
+        client->Disconnect();
+
+        int j;
+        std::cout << "[quic_toy_client] network is unreachable or RTOS, so connect again" << std::endl;
+        for(j=0; j<20; j++) {
+        // re-request after a*rto except for first case
+        if (j != 0) {
+          int64_t lookup_interval = UpdateTimerLookupForNormalQUIC();
+
+          if (lookup_interval == -1) {
+            std::cerr << "Failed to find new path." << std::endl;
+
+            // if other error, that case will skip
+            std::fstream writer;
+            writer.open("measure_delay.txt", std::ios::app);
+            writer << std::endl;
+            writer.close();
+
+            networkChangeThread.join();
+            return 1;
+          }
+
+          std::cout << "[quic_toy_client] network is unreachable more than "
+                        "one, wait about "
+                    << lookup_interval << "msec" << std::endl;
+
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(lookup_interval));
+        }
+
           if (!client->Initialize()) {
             std::cerr << "Failed to reinitialize client between requests."
                       << std::endl;
-            return 1;
+            continue;
           }
 
           if (!client->Connect()) {
             std::cerr << "Failed to reconnect client between requests."
                                 << std::endl;
-            return 1;
+            continue;
           }
-          continue;
-        }
-        // if, other error, that case will skip
-        std::fstream writer;
-        writer.open("measure_delay.txt", std::ios::app);
-        writer << std::endl;
-        writer.close();
-      }
 
-      if(ho_num > 0) {
-        networkChangeThread.join();
+          std::cout << "[quic_toy_client] success to connect with server" << std::endl;
+          break;
+        }
+
+        // request again
+        cur_num_req++;
+        continue;
       }
-      return 1;
     }
 
     int response_code = client->latest_response_code();
@@ -750,7 +832,7 @@ int QuicToyClient::SendRequestsAndPrintResponses(
       return 1;
     }
 
-    if (i + 1 < num_requests) {  // There are more requests to perform.
+    if (i + 1 < cur_num_req) {  // There are more requests to perform.
       if (GetQuicFlag(FLAGS_one_connection_per_request)) {
         std::cout << "Disconnecting client between requests." << std::endl;
         client->Disconnect();
@@ -781,26 +863,29 @@ int QuicToyClient::SendRequestsAndPrintResponses(
   std::fstream writer;
   if(ho_start == 0)
     ho_start = client->session()->connection()->GetHandoverStart();
-  if(GetQuicFlag(FLAGS_enable_cm))
-    ho_delay = client->session()->connection()->GetHandoverDelay();
-  else
-    ho_delay = client->session()->connection()->GetHandoverZeroRTT() - ho_start;
 
-  if(ho_delay > 100000) {
-    ho_delay = 0;
+  if(cm_enable) {
+    ho_delay = client->session()->connection()->GetHandoverDelay();
+  } else {
+    if(client->session()->connection()->GetHandoverZeroRTT() >= ho_start) {
+      ho_delay = client->session()->connection()->GetHandoverZeroRTT() - ho_start;
+    } else {
+      ho_delay = 0;
+    }
   }
 
   //curBW = client->session()->connection()->sent_packet_manager().BandwidthEstimate().ToBitsPerSecond();
   //SaveBandwidth(preBW, curBW);
 
   uint64_t total_received_packets = client->session()->connection()->GetLargestReceivedPacket().ToUint64();
+
   total_received_packets += preLa;
-
-  std::cout << "[quic_toy_client] Total Delay : " << end_ - start_ <<  " msec / HO Delay : " << ho_delay << " msec / Total Received Packets: " << total_received_packets << " / Total Result: " << total_success << std::endl;
+  std::cout << "[quic_toy_client] Total Delay : " << end_ - start_ <<  " msec / HO Delay : " << ho_delay << " msec / Total Received Packets: " << total_received_packets << std::endl;
   writer.open("measure_delay.txt", std::ios::app);
-  writer << ho_delay << '\t' << end_ - start_ << std::endl;
+  writer << ho_delay << '\t'<< '\t' << end_ - start_ << std::endl;
+  //writer << end_ - start_ << std::endl;
+  //writer << ho_delay << '\t' << count_lookup << std::endl;
   writer.close();
-
 
   writer.open("ho_count.txt", std::ios::app);
   writer << client->ho_count << std::endl;

@@ -192,17 +192,17 @@ class FastRoutingTableSearchAlarmDelegate
 
     void OnAlarm() override {
       QUICHE_DCHECK(connection_->connected());
-      std::cout << "[quic_connection] HD timeout - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
+      std::cout << "[quic_connection] Handover Detection timeout - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
       std::fstream writer;
-      writer.open("measure_delay.txt", std::ios::app);
-      writer << "HD Timeout\t";
-      writer.close();
+      if(connection_->GetHandoverDelay() == 0) {
+        writer.open("measure_delay.txt", std::ios::app);
+        writer << connection_->sent_packet_manager().GetPtoDelay() * 3 << std::endl;
+        writer.close();
+      }
 
       int res = connection_->OnNetworkUnrearchable();
       if(res == 0) {
-        connection_->SetCloseTimer();
-      } else if(res == 1) {
-        connection_->SetFastTimer();
+        connection_->UpdateTimerLookup();
       }
     }
 };
@@ -215,17 +215,14 @@ class CloseRoutingTableSearchAlarmDelegate
 
     void OnAlarm() override {
       QUICHE_DCHECK(connection_->connected());
-      std::cout << "[quic_connection] Close timeout - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
+      std::cout << "[quic_connection] RLT timeout, Lookup routing table - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
 
-      if(!connection_->OnNetworkUnrearchable()) {
-        if(!connection_->IsCloseCountZero()) {
-          std::cout << "[quic_connection] close count down and Set close timer again" << std::endl;
-          connection_->CloseCountDown();
-          connection_->SetCloseTimer();
-        } else {
-          std::cout << "[quic_connection] Last Search Fail, connection will close" << std::endl;
-          connection_->OnWriteError(101);
-        }
+      int res = connection_->OnNetworkUnrearchable();
+      if(res == 0) {
+        connection_->UpdateTimerLookup();
+      } else if(res == 1) {
+        std::cout << "[quic_connection] Unexpected operation - " << connection_->timeStamp() - connection_->GetHandoverStart() << "msec" << std::endl;
+        connection_->OnWriteError(101);
       }
     }
 };
@@ -420,9 +417,42 @@ QuicConnection::QuicConnection(
   packet_creator_.SetDefaultPeerAddress(initial_peer_address);
 
   // [SD] close count
-  init_close_rt_count = 5;
-  close_rt_count = init_close_rt_count;
+  InitTimerLookup();
 }
+
+void QuicConnection::UpdateTimerLookup() {
+  int lookup_interval;
+  
+  if(close_rt_search_alarm_->IsSet()) {
+    std::cout << "[quic_connection] RLT already set" << std::endl;
+    return;
+  }
+
+  lookup_interval = (1 << tlu_ex_factor)*(init_lookup_interval);
+  tlu_ex_factor++;
+ 
+  if(lookup_interval > sent_packet_manager_.GetNetworkBlackholeDelay(5).ToMilliseconds()) {
+    // Deadline
+    OnWriteError(101);
+    return;
+  }
+
+  std::cout << "[quic_connection] Update RLT from current time (" << tlu_ex_factor << "/" << lookup_interval << ")" << std::endl;
+  close_rt_search_alarm_->Update(clock_->ApproximateNow() + quic::QuicTime::Delta::FromMilliseconds(lookup_interval), kAlarmGranularity);
+  // std::cout << "[quic_connection] " << clock_->ApproximateNow() << 
+  //   "/"<< quic::QuicTime::Delta::FromMilliseconds(lookup_interval) << "/" << quic::QuicTime::Delta::FromMicroseconds(lookup_interval) << 
+  //   " deadline: " << close_rt_search_alarm_->deadline() << std::endl;
+  
+  //std::cout << "State : " << close_rt_search_alarm_->IsSet() << std::endl;
+}
+
+void QuicConnection::InitTimerLookup() {
+  //std::cout << "[quic_connection] Init Close Timer" << std::endl;
+  close_rt_search_alarm_->Cancel();
+  init_lookup_interval = 50;
+  tlu_ex_factor = 0;
+}
+
 
 void QuicConnection::InstallInitialCrypters(QuicConnectionId connection_id) {
   CrypterPair crypters;
@@ -782,6 +812,7 @@ bool QuicConnection::MaybeTestLiveness() {
     return false;
   }
   const QuicTime::Delta timeout = idle_network_deadline - now;
+  //std::cout << "[quic_connnection] idle timeout: " << timeout << std::endl;
   if (2 * timeout > idle_network_detector_.idle_network_timeout()) {
     // Do not test liveness if timeout is > half timeout. This is used to
     // prevent an infinite loop for short idle timeout.
@@ -1444,7 +1475,7 @@ bool QuicConnection::OnStreamFrame(const QuicStreamFrame& frame) {
   if(first_try) {
     //std::cout << "[quic_connection] first try" << std::endl;
     checkAddress = last_received_packet_info_.destination_address;
-    //first_rcv_ = timeStamp();
+    first_rcv_ = timeStamp();
     first_try = false;
   }
 
@@ -1812,7 +1843,16 @@ bool QuicConnection::OnPathChallengeFrame(const QuicPathChallengeFrame& frame) {
          "is closed. Last frame: "
       << most_recent_frame_type_;
 
-  std::cout << "[quic_connection] Received Path Challenge Frame - last me: " << last_received_packet_info_.destination_address <<" default: "<< default_path_.self_address << " (" << timeStamp() - ho_start_ << " msec" << ")" << std::endl;
+  if(mquic_cwnd_size > 0) {
+    // use the option of FLAGS_new_connection_measure in the server.
+    // std::cout << "[quic_connection] Set handover adjustment factor: 1/" << mquic_cwnd_size << std::endl;
+    sent_packet_manager_.mquic_cwnd_size = mquic_cwnd_size;
+  }
+
+  // [SD] cwnd override
+  //sent_packet_manager_.cwind_override = true;
+
+  std::cout << "[quic_connection] Received PC - last ip: " << last_received_packet_info_.destination_address <<"  cur ip: "<< default_path_.self_address << " - " << timeStamp() - ho_start_ << " msec" << std::endl;
   if (has_path_challenge_in_current_packet_) {
     QUICHE_DCHECK(send_path_response_);
     QUIC_RELOADABLE_FLAG_COUNT_N(quic_send_path_response2, 2, 5);
@@ -1864,7 +1904,7 @@ bool QuicConnection::OnPathChallengeFrameInternal(
                   << current_effective_peer_address;
     QUIC_CODE_COUNT_N(quic_kick_off_client_address_validation, 2, 6);
 
-    std::cout << "[quic_connection] Reverse Path Validation in order to receive PATH CHALLENGE" << std::endl;
+    std::cout << "[quic_connection] Start reverse path validation" << std::endl;
     ValidatePath(std::make_unique<ReversePathValidationContext>(
                      default_path_.self_address,
                      last_received_packet_info_.source_address,
@@ -1908,12 +1948,22 @@ bool QuicConnection::OnPathChallengeFrameInternal(
   return connected_;
 }
 
+QuicTime pv_start = QuicTime::Zero();
+QuicTime pv_end = QuicTime::Zero();
 bool QuicConnection::OnPathResponseFrame(const QuicPathResponseFrame& frame) {
   QUIC_BUG_IF(quic_bug_10511_9, !connected_)
       << "Processing PATH_RESPONSE frame when connection "
          "is closed. Last frame: "
       << most_recent_frame_type_;
-  std::cout << "[quic_connection] Received PATH RESPONSE - " << GetEffectivePeerAddressFromCurrentPacket() << " (" << timeStamp() - ho_start_ << " msec" << ")" << std::endl;
+
+  pv_end = clock_->Now();
+  std::cout << "[quic_connection] Received PR - "
+            << GetEffectivePeerAddressFromCurrentPacket() << " - "
+            << timeStamp() - ho_start_ << " msec"
+            << " - RTTnew: " << pv_end - pv_start
+            << std::endl;
+  sent_packet_manager_.SetPathValidationRtt(pv_end-pv_start);
+
 
   if (!UpdatePacketContent(PATH_RESPONSE_FRAME)) {
     std::cout << "[quic_connection] PR update" << std::endl;
@@ -1957,23 +2007,18 @@ bool QuicConnection::OnConnectionCloseFrame(
   if(perspective_ == Perspective::IS_SERVER) {
     // measure connection migration
     //std::cout << "[quic_connection] Server Connection Close - cid: " << GetOneActiveServerConnectionId() << std::endl;
+    sent_packet_manager_.initMeasureState();
     std::fstream writer;
-    writer.open("bandwidth.txt", std::ios::app);
-    if(measure_nc_ == 0) {
-    std::cout << "[quic_connection] Server Connection Close (CM) - Before: "  << pre_bw_ <<  " Mbps / After: " << BandwidthUnit() << " Mbps" << std::endl;
-      writer << pre_bw_ << '\t' << BandwidthUnit() << std::endl;
-    }
-    else {
-      std::cout << "[quic_connection] Server Connection Close (NC)" << std::endl;
-      writer << std::endl;
-    }
+    writer.open("cc_log.txt", std::ios::app);
+    writer << std::endl;
     writer.close();
 
-    pre_bw_ = bw_ = 0;
     cm_state_ = false;
     maxWindow = 0;
     maxRet = 0;
     window_flag = true; 
+
+    std::cout << "[quic_connection] Received CC from client, Connection Closed.. " << std::endl;
   }
 
   if (debug_visitor_ != nullptr) {
@@ -2674,8 +2719,10 @@ size_t QuicConnection::SendCryptoData(EncryptionLevel level,
   return consumed_length;
 }
 
-uint64_t prePSN;
+uint64_t prePSN = 0;
 QuicPacketCount preWindow(0);
+uint64_t preSentTime = 0;
+QuicStreamOffset pre_offset = 0;
 QuicConsumedData QuicConnection::SendStreamData(QuicStreamId id,
                                                 size_t write_length,
                                                 QuicStreamOffset offset,
@@ -2717,11 +2764,19 @@ QuicConsumedData QuicConnection::SendStreamData(QuicStreamId id,
     // server.)
 
     if (perspective() == Perspective::IS_SERVER) {
-        std::cout << "[quic_connection] send stream (" << offset << ") - PSN: "  << packet_creator_.NextSendingPacketNumber().ToUint64() << "(" << packet_creator_.NextSendingPacketNumber().ToUint64() - prePSN << ") - Retransmitted: " << stats_.packets_retransmitted << 
-          " Window Size: " << sent_packet_manager_.GetCongestionWindowInTcpMss() << "(" << sent_packet_manager_.GetCongestionWindowInTcpMss() - preWindow << ")" << " smoothedRtt: " << sent_packet_manager_.GetRttStats()->smoothed_rtt() << "  latestRtt: " << sent_packet_manager_.GetRttStats()->latest_rtt() << std::endl;
+        // QuicPacketCount diffwind = sent_packet_manager_.GetCongestionWindowInTcpMss() > preWindow ? sent_packet_manager_.GetCongestionWindowInTcpMss() - preWindow  : 0;
+        // QuicStreamOffset diffoffset = offset > pre_offset?  offset - pre_offset : 0;
+        // std::cout << "[quic_connection] send stream (" << diffoffset << ") - psn: "  << packet_creator_.NextSendingPacketNumber().ToUint64() << "(" << packet_creator_.NextSendingPacketNumber().ToUint64() - prePSN << ") - RetNum: " << stats_.packets_retransmitted 
+        //   << " cwind: " << sent_packet_manager_.GetCongestionWindowInTcpMss() << "(" << diffwind << ")" 
+        //   << " sRtt/lRtt: " << sent_packet_manager_.GetRttStats()->smoothed_rtt() << "/" << sent_packet_manager_.GetRttStats()->latest_rtt()
+        //   << " pto/rto: " << sent_packet_manager_.GetPtoDelay() << "/" << sent_packet_manager_.GetRetransmissionDelayForTimer(1).ToMilliseconds()
+        //   << " - " << timeStamp() - preSentTime << " msec" << std::endl;
 
-        prePSN = packet_creator_.NextSendingPacketNumber().ToUint64();
-        preWindow = sent_packet_manager_.GetCongestionWindowInTcpMss();
+
+        // pre_offset = offset;
+        // preSentTime = timeStamp();
+        // prePSN = packet_creator_.NextSendingPacketNumber().ToUint64();
+        // preWindow = sent_packet_manager_.GetCongestionWindowInTcpMss();
 
         if(maxWindow < sent_packet_manager_.GetCongestionWindowInTcpMss() && window_flag) {
             maxWindow = sent_packet_manager_.GetCongestionWindowInTcpMss();
@@ -2729,18 +2784,6 @@ QuicConsumedData QuicConnection::SendStreamData(QuicStreamId id,
 
         if(maxRet < stats_.packets_retransmitted) {
            maxRet = stats_.packets_retransmitted;
-        }
-
-        if(sent_packet_manager_.BandwidthEstimate().ToBitsPerSecond() > 0) {
-          bw_ = sent_packet_manager_.BandwidthEstimate().ToBitsPerSecond();
-          if(measure_nc_ > 0 && !measure_one && packet_creator_.NextSendingPacketNumber().ToUint64() > (uint64_t)measure_nc_) {
-            measure_one = true;
-            std::fstream writer;
-            std::cout << "[quic_connection] measuring... - " << measure_nc_ << " - Current:  " << BandwidthUnit() << " Mbps --------------------------" << std::endl;
-            writer.open("bandwidth.txt", std::ios::app);
-            writer << BandwidthUnit() << '\t';
-            writer.close();
-          }
         }
     }
 
@@ -2960,6 +3003,13 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   if (!connected_) {
     return;
   }
+
+  // if (measure_nc_ > 0) {
+  //   // use the option of FLAGS_new_connection_measure in the server.
+  //   std::cout << "[quic_connection] Set cwind override - process udp" << std::endl;
+  //   sent_packet_manager_.cwind_override = true;
+  // }
+
   QUIC_DVLOG(2) << ENDPOINT << "Received encrypted " << packet.length()
                 << " bytes:" << std::endl
                 << quiche::QuicheTextUtils::HexDump(
@@ -2977,10 +3027,10 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   // RT search timer
   // In proposed scheme, update timer
   if(active_cm_) {
+    //std::cout << "[quic_connection] update HDT, RLT - " << last_received_packet_info_.destination_address << std::endl;
     fast_rt_search_alarm_->Update(clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay()*3, kAlarmGranularity);
     if(close_rt_search_alarm_->IsSet()) {
-      close_rt_search_alarm_->Cancel();
-      close_rt_count = init_close_rt_count;
+      InitTimerLookup();
     }
   }
 
@@ -3395,7 +3445,7 @@ void QuicConnection::WriteQueuedPackets() {
                                buffered_packets_.size(), 1, 1000, 50, "");
 
   while (!buffered_packets_.empty()) {
-    std::cout << "[quic_connection] WriteQueuedPackets... blocked?" << std::endl;
+    //std::cout << "[quic_connection] WriteQueuedPackets... blocked?" << std::endl;
     if (HandleWriteBlocked()) {
       break;
     }
@@ -3406,7 +3456,7 @@ void QuicConnection::WriteQueuedPackets() {
         packet.encrypted_buffer.data(), packet.encrypted_buffer.length(),
         packet.self_address.host(), packet.peer_address, per_packet_options_);
     QUIC_DVLOG(1) << ENDPOINT << "Sending buffered packet, result: " << result;
-    std::cout << "[quic_connection] Sending buffered packet, result: " << result << std::endl;
+    //std::cout << "[quic_connection] Sending buffered packet, result: " << result << std::endl;
     if (IsMsgTooBig(result) &&
         packet.encrypted_buffer.length() > long_term_mtu_) {
       // When MSG_TOO_BIG is returned, the system typically knows what the
@@ -3674,6 +3724,8 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
     return true;
   }
 
+  sent_packet_manager_.SetRetransmittedPacket(stats_.packets_retransmitted);
+
   const bool is_mtu_discovery = QuicUtils::ContainsFrameType(
       packet->nonretransmittable_frames, MTU_DISCOVERY_FRAME);
   const SerializedPacketFate fate = packet->fate;
@@ -3897,20 +3949,18 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
 
   if (IsWriteError(result.status)) {
     // [SD] Ignore network unreachable error
-    if(result.error_code == 101 && active_cm_ == true) {
-      std::cout << "[quic_connection] network unreachable but, keep operating - (" << timeStamp() - ho_start_ << " msec" << ")" <<  std::endl;
+    if(active_cm_ && result.error_code == 101) {
+      std::cout << "[quic_connection] Network is unreachable, Lookup routing table - (" << timeStamp() - ho_start_ << " msec" << ")" <<  std::endl;
       if(watcher_ == true)
         return true;
 
-      if(cb_visitor_->OnNetworkUnreachable() != 2) {
+      // cancel T[hd] to prevent from setting T[close] again
+      fast_rt_search_alarm_->Cancel();
+
+      if(!OnNetworkUnrearchable()) {
         pending_packets_.push_back(CopySerializedPacket(*packet, helper_->GetStreamSendBufferAllocator(), false));
-
-        if(!close_rt_search_alarm_->IsSet() && close_rt_count == init_close_rt_count) {
-          std::cout << "[quic_connection] Set close rt search alarm because network is unreachable " << std::endl;
-          close_rt_search_alarm_->Set(clock_->ApproximateNow() + QuicTime::Delta::FromMilliseconds(1000));
-        }
+        UpdateTimerLookup();
       }
-
       return true;
     }
 
@@ -4087,6 +4137,13 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
     ++stats_.packets_retransmitted;
   }
 
+  if(active_cm_) {
+    fast_rt_search_alarm_->Update(clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay()*3, kAlarmGranularity);
+    if(close_rt_search_alarm_->IsSet()) {
+      InitTimerLookup();
+    }
+  }
+
   return true;
 }
 
@@ -4257,6 +4314,7 @@ bool QuicConnection::ShouldDiscardPacket(EncryptionLevel encryption_level) {
 
 QuicTime QuicConnection::GetPathMtuReductionDeadline() const {
   if (previous_validated_mtu_ == 0) {
+    //std::cout << "[quic_connection] get path mtu X" << std::endl;
     return QuicTime::Zero();
   }
   QuicTime::Delta delay = sent_packet_manager_.GetMtuReductionDelay(
@@ -5549,6 +5607,15 @@ bool QuicConnection::WritePacketUsingWriter(
       packet->encrypted_buffer, packet->encrypted_length, self_address.host(),
       peer_address, per_packet_options_);
 
+  //std::cout << "[quic_connection] WritePacketUsingWriter:" << std::endl;
+  for(unsigned long i=0; i<packet->nonretransmittable_frames.size(); i++) {
+      std::cout << packet->nonretransmittable_frames[i] << std::endl;
+  }
+  for(unsigned long i=0; i<packet->retransmittable_frames.size(); i++) {
+      std::cout << packet->retransmittable_frames[i] << std::endl;
+  }
+
+
   // If using a batch writer and the probing packet is buffered, flush it.
   if (writer->IsBatchMode() && result.status == WRITE_STATUS_OK &&
       result.bytes_written == 0) {
@@ -5628,7 +5695,7 @@ void QuicConnection::OnEffectivePeerMigrationValidated() {
   highest_packet_sent_before_effective_peer_migration_.Clear();
   //std::cout << "[quic_connection] onEffectivePeerMigrationValidated() Change Type: " << active_effective_peer_migration_type_ << std::endl;
 
-  std::cout << "[quic_connection] Before send NEW_TOKEN, type is " << active_effective_peer_migration_type_ << std::endl;
+  //std::cout << "[quic_connection] Before send NEW_TOKEN, type is " << active_effective_peer_migration_type_ << std::endl;
   const bool send_address_token =
       active_effective_peer_migration_type_ != PORT_CHANGE;
   active_effective_peer_migration_type_ = NO_CHANGE;
@@ -5652,7 +5719,7 @@ void QuicConnection::OnEffectivePeerMigrationValidated() {
   default_path_.validated = true;
   alternative_path_.Clear();
   if (send_address_token) {
-    std::cout << "[quic_connection] Send NEW TOKEN" << std::endl;
+    //std::cout << "[quic_connection] Send NEW TOKEN" << std::endl;
     visitor_->MaybeSendAddressToken();
   }
 }
@@ -5837,7 +5904,7 @@ void QuicConnection::StartEffectivePeerMigration(AddressChangeType type) {
       // validation.
       ++stats_.num_peer_migration_to_proactively_validated_address;
     }
-    std::cout << "[quic_connection] Default path is already validated, maybe send NEW TOKEN" << std::endl;
+    //std::cout << "[quic_connection] Default path is already validated, maybe send NEW TOKEN" << std::endl;
     OnEffectivePeerMigrationValidated();
     return;
   }
@@ -5989,7 +6056,7 @@ bool QuicConnection::UpdatePacketContent(QuicFrameType type) {
   if (version().HasIetfQuicFrames()) {
     if (!QuicUtils::IsProbingFrame(type)) {
       if(current_effective_peer_migration_type_ != NO_CHANGE)
-        std::cout << "[quic_connection] Received Changed Non-Probing " << type << " from " << default_path_.peer_address << " to " << GetEffectivePeerAddressFromCurrentPacket() << std::endl;
+        std::cout << "[quic_connection] Received non-probing " << type << " - prev client ip: " << default_path_.peer_address << " new client ip: " << GetEffectivePeerAddressFromCurrentPacket() << std::endl;
       MaybeStartIetfPeerMigration();
       
       return connected_;
@@ -6150,7 +6217,7 @@ void QuicConnection::MaybeStartIetfPeerMigration() {
       if (!validate_client_addresses_) {
         UpdatePeerAddress(last_received_packet_info_.source_address);
       }
-      std::cout << "[quic_connection] Migration(non-probing) type is " << current_effective_peer_migration_type_ << " so, start migration" << std::endl;
+      //std::cout << "[quic_connection] Migration(non-probing) type is " << current_effective_peer_migration_type_ << " so, start migration" << std::endl;
       StartEffectivePeerMigration(current_effective_peer_migration_type_);
     } else {
       UpdatePeerAddress(last_received_packet_info_.source_address);
@@ -6173,7 +6240,7 @@ void QuicConnection::PostProcessAfterAckFrame(bool send_stop_waiting,
   // have a better estimate of the current rtt than when it was set.
   SetRetransmissionAlarm();
   if (acked_new_packet) {
-    //std::cout << "[quic_connection] acked_new_packet - post process after ack frame" << std::endl;
+    //std::cout << "[quic_connection] Received New ACK => PostProcessAfterAckFrame => acked_new_packet => OnForwardProgressMade" << std::endl;
     OnForwardProgressMade();
   } else if (default_enable_5rto_blackhole_detection_ &&
              !sent_packet_manager_.HasInFlightPackets() &&
@@ -6889,6 +6956,7 @@ void QuicConnection::MaybeUpdateAckTimeout() {
 
 QuicTime QuicConnection::GetPathDegradingDeadline() const {
   if (!ShouldDetectPathDegrading()) {
+    //std::cout << "[quic_connection] off path degrading deadline" << std::endl;
     return QuicTime::Zero();
   }
   return clock_->ApproximateNow() +
@@ -6968,14 +7036,15 @@ bool QuicConnection::SendPathChallenge(
       QuicPacketCreator::ScopedPeerAddressContext context(
           &packet_creator_, peer_address, client_cid, server_cid,
           connection_migration_use_new_cid_);
+      pv_start = clock_->Now();
       if (writer == writer_) {
         ScopedPacketFlusher flusher(this);
         // It's on current path, add the PATH_CHALLENGE the same way as other
         // frames. This may cause connection to be closed.
-        std::cout << "[quic_connection] Send Path Challenge (Non-Probing packet) - from:" << self_address << " to:" << peer_address << "(" << timeStamp() - ho_start_ << "msec)" << std::endl;
+        std::cout << "[quic_connection] Send PC (Non-Probing packet) from:" << self_address << "  to:" << peer_address << " - " << timeStamp() - ho_start_ << "msec" << std::endl;
         packet_creator_.AddPathChallengeFrame(data_buffer);
       } else {
-        std::cout << "[quic_connection] Send Path Challenge (Probing Packet) - from:" << self_address << " to:" << peer_address << "(" << timeStamp() - ho_start_ << "msec)" << std::endl;
+        std::cout << "[quic_connection] Send PC (Probing Packet) from:" << self_address << "  to:" << peer_address << " - " << timeStamp() - ho_start_ << "msec" << std::endl;
         std::unique_ptr<SerializedPacket> probing_packet =
             packet_creator_.SerializePathChallengeConnectivityProbingPacket(
                 data_buffer);
@@ -7017,6 +7086,7 @@ QuicTime QuicConnection::GetRetryTimeout(
   if (writer_to_use == writer_ && peer_address_to_use == peer_address()) {
     return clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay();
   }
+  // OMG!!!! new route, new rtt
   return clock_->ApproximateNow() +
          QuicTime::Delta::FromMilliseconds(3 * kInitialRttMs);
 }
@@ -7120,7 +7190,7 @@ bool QuicConnection::SendPathResponse(
       last_received_packet_info_.destination_address) {
     // The PATH_CHALLENGE is received on the default socket. Respond on the same
     // socket.
-    std::cout << "[quic_connection] Default path - Send PATH RESPONSE frame from " << default_path_.self_address << " to " << peer_address_to_send << "(" << timeStamp() - ho_start_ << "msec)" << std::endl;
+    std::cout << "[quic_connection] Send PR from " << default_path_.self_address << " to " << peer_address_to_send << " - " << timeStamp() - ho_start_ << "msec - Default path" << std::endl;
     return packet_creator_.AddPathResponseFrame(data_buffer);
   }
 
@@ -7132,7 +7202,7 @@ bool QuicConnection::SendPathResponse(
           last_received_packet_info_.destination_address) {
     // Ignore this PATH_CHALLENGE if it's received from an uninteresting
     // socket.
-    std::cout << "[quic_connection] Pending PATH RESPONSE frame to " << peer_address_to_send << " me: " << default_path_.self_address << std::endl;
+    std::cout << "[quic_connection] Pending PR to " << peer_address_to_send << " me: " << default_path_.self_address << std::endl;
     return true;
   }
   QuicPacketWriter* writer = path_validator_.GetContext()->WriterToUse();
@@ -7147,7 +7217,7 @@ bool QuicConnection::SendPathResponse(
   // Ignore the return value to treat write error on the alternative writer as
   // part of network error. If the writer becomes blocked, wait for the peer to
   // send another PATH_CHALLENGE.
-  std::cout << "[quic_connection] Alternative Path - Send PATH RESPONSE frame to " << peer_address_to_send << " last me: " << last_received_packet_info_.destination_address <<  "(" << timeStamp() - ho_start_ << "msec)"  << std::endl;
+  std::cout << "[quic_connection] Send PR to " << peer_address_to_send  <<  " - " << timeStamp() - ho_start_ << "msec - Alternative Path"  << std::endl;
   WritePacketUsingWriter(std::move(probing_packet), writer,
                          last_received_packet_info_.destination_address,
                          peer_address_to_send,
@@ -7256,13 +7326,13 @@ bool QuicConnection::MigratePath(const QuicSocketAddress& self_address,
   }
   QUICHE_DCHECK(!version().UsesHttp3() || IsHandshakeConfirmed());
 
-  std::cout << "[quic_connection] Try migration to " << self_address << std::endl;
+  std::cout << "[quic_connection] Migrate to path (" << self_address << ")" << std::endl;
   if (connection_migration_use_new_cid_) {
     if (!UpdateConnectionIdsOnClientMigration(self_address, peer_address)) {
       if (owns_writer) {
         delete writer;
       }
-      std::cout << "[quic_connection] Fail to " << self_address << std::endl;
+      std::cout << "[quic_connection] Failure migration to " << self_address << std::endl;
       return false;
     }
     if (packet_creator_.GetServerConnectionId().length() !=
@@ -7288,10 +7358,10 @@ bool QuicConnection::MigratePath(const QuicSocketAddress& self_address,
   SetQuicPacketWriter(writer, owns_writer);
   MaybeClearQueuedPacketsOnPathChange();
   OnSuccessfulMigration(is_port_change);
-  std::cout << "[quic_connection] Migration Complete! to " << self_address << std::endl;
+  std::cout << "[quic_connection] Complete migration" << std::endl;
   // [SD] routing search timer init 0
-  InitRoutingTableSearchTimer();
-  close_rt_count = init_close_rt_count;
+  fast_rt_search_alarm_->Cancel();
+  InitTimerLookup();
   
   // if(pending_packet_ != NULL) {
   //   std::cout << "[quic_connection] ret-frame:" << std::endl;
@@ -7567,7 +7637,7 @@ void QuicConnection::ReversePathValidationResultDelegate::
       QUIC_BUG(quic_bug_10511_43)
           << connection_->quic_bug_10511_43_error_detail_;
     }
-    std::cout << "[quic_connection] Reverse Validation Complete [this path is current default path]" << std::endl;
+    std::cout << "[quic_connection] Path validation complete, but this path is not default path" << std::endl;
 
     connection_->OnEffectivePeerMigrationValidated();
   } else {
@@ -7576,7 +7646,7 @@ void QuicConnection::ReversePathValidationResultDelegate::
     QUIC_CODE_COUNT_N(quic_kick_off_client_address_validation, 4, 6);
     QUIC_DVLOG(1) << "Mark alternative peer address "
                   << context->effective_peer_address() << " validated.";
-    std::cout << "[quic_connection] Reverse Validation Complete [this path is not current default path] " << std::endl;
+    std::cout << "[quic_connection] Path validation complete, but this path is not default path" << std::endl;
     connection_->alternative_path_.validated = true;
   }
   connection_->cm_state_ = true;
