@@ -42,7 +42,7 @@ If you download mQUIC, a net folder will exist, which contains modified Chromium
 
 ```bash
 $ cd mQUIC
-$ bash port_module.sh
+$ bash port_mquic.sh
 ```
 
 After porting the code, a net_backup folder is created, which contains copied original Chromium code. Now, you can build Chromium with mQUIC. If Chromium had been installed, the gn tool would have been installed together. This is a meta-build system for generating ninja build files. First, ninja build files are generated with the gn tool. Then, mQUIC client and server are built with the ninja build tool.
@@ -85,6 +85,8 @@ $ bash quic_server.sh 0
 ```bash
 $ bash quic_server.sh 1
 ```
+
+In the "quic_server_data" folder, the "index_dir" directory contains various files of different sizes. To exchange a desired file with the one on "quic.smalldragon.net" and run the server, simply select a file and execute the process.
 
 
 
