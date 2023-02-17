@@ -11,4 +11,5 @@ then
 
     rsync ./net_backup/third_party/quiche/src/quic/core/quic_dispatcher.* ../net/third_party/quiche/src/quic/core
     rsync ./net_backup/third_party/quiche/src/quic/tools/quic_toy_server.* ./net_backup/third_party/quiche/src/quic/tools/quic_spdy_server_base.* ./net_backup/third_party/quiche/src/quic/tools/quic_server.* ../net/third_party/quiche/src/quic/tools
+    rsync ./net_backup/tools/quic/quic_simple_server.* ../net/tools/quic
 fi
