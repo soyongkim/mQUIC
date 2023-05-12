@@ -10,8 +10,3 @@ default:
   server:
     name: "quic.smalldragon.net"
     host: 0.0.0.0
-  single:
-    ssid1: "ssid1"
-    pass1: "password1"
-    ssid2: "ssid2"
-    pass2: "password2"

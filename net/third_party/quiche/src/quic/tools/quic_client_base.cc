@@ -222,9 +222,9 @@ int QuicClientBase::OnNetworkUnreachable() {
     } 
     // same info found
     if(newGateway == current_path_gateway_) {
-      std::cout << "[quic_client_base] Same Gateway, so check IP. new: " << newGateway << " / cur: " << current_path_gateway_ << std::endl;
+      //std::cout << "[quic_client_base] Same Gateway, so check IP. new: " << newGateway << " / cur: " << current_path_gateway_ << std::endl;
       if(newIP == current_path_ip_) {
-        std::cout << "[quic_client_base] Not Changed IP new: " << newIP << " / cur: " << current_path_ip_ << std::endl;
+        //std::cout << "[quic_client_base] Not Changed IP new: " << newIP << " / cur: " << current_path_ip_ << std::endl;
         return 1;
       }
     }

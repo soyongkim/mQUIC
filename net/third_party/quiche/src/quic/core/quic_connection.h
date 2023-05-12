@@ -652,12 +652,37 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
 
   void SetFastTimer() {
-    if(!fast_rt_search_alarm_->IsSet()) {
+    if(!hdt_alarm_->IsSet()) {
       //std::cout << "[quic_connection] Set fast rt search alarm because fast timer is expired " << std::endl;
-      fast_rt_search_alarm_->Set(clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay()*3);
+      hdt_alarm_->Set(clock_->ApproximateNow() + sent_packet_manager_.GetPtoDelay()*3);
     }
   }
 
+  QuicTime HDTDeadline() {
+    return hdt_alarm_->deadline();
+  }
+
+  bool IsSetHDT() {
+    return hdt_alarm_->IsSet();
+  }
+
+  void BoomHDT() {
+    if(hdt_alarm_->IsSet()) {
+      hdt_alarm_->Cancel();
+    }
+    hdt_alarm_->Set(NowTime());
+  }
+  
+  bool IsPCHDT() {
+    return hdt_alarm_->IsPermanentlyCancelled();
+  }
+
+  QuicTime NowTime() {
+    return clock_->ApproximateNow();
+  }
+
+
+  uint64_t rlt_interval_; 
   // [SD] timestamp
   uint64_t timeStamp();
 
@@ -739,9 +764,10 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   int tlu_ex_factor;
   int init_lookup_interval;
   int counting_rt = 0;
+  int sent_ack_num = 0;
 
-  void UpdateTimerLookup();
-  void InitTimerLookup();
+  void UpdateRLT();
+  void CancelRLT();
 
   // From QuicFramerVisitorInterface
   void OnError(QuicFramer* framer) override;
@@ -2162,8 +2188,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   QuicArenaScopedPtr<QuicAlarm> discard_zero_rtt_decryption_keys_alarm_;
 
   // An alarm that find new path
-  QuicArenaScopedPtr<QuicAlarm> fast_rt_search_alarm_;
-  QuicArenaScopedPtr<QuicAlarm> close_rt_search_alarm_;
+  QuicArenaScopedPtr<QuicAlarm> hdt_alarm_;
+  QuicArenaScopedPtr<QuicAlarm> rlt_alarm_;
+  QuicArenaScopedPtr<QuicAlarm> rlt_deadline_alarm_;
 
   // Neither visitor is owned by this class.
   QuicConnectionVisitorInterface* visitor_;

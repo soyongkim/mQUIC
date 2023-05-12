@@ -4,11 +4,11 @@ This is an implementation of the article titled 'mQUIC: Use of QUIC for Handover
 
 The mQUIC(mobile QUIC) is designed with the following key requirements:
 
-1) Ability to detect handover events within a reasonable time, without relying on underlying link-layer information;
-2) Obtaining a new IP address through routing table lookup, instead of establishing a new connection;
-3) Performing path validation and connection migration with the remote server using the new IP address;
-4) Supporting both homogeneous handover within the same network and heterogeneous handover across different networks; and
-5) Preserving the congestion window size of the existing path in the new network, if the newly visited network has better conditions, so as to improve throughput performance.
+1) Handover detection based on an error event associated with data transmission, without relying on the underlying link-layer information; 
+2) Fast detection of a handover by using an appropriate timer, when an error-based handover detection is not available; 
+3) Obtaining a new IP address by routing table lookup, instead of establishing a new connection, for handover support; 
+4) Handover support in networks with large handover delay; 
+5) Performing the path validation and connection migration of QUIC with the server by using the new IP address.
 
 The mQUIC implementation was developed based on Chromium (quiche), and both the modified code from Chromium and a shell script file that can apply the code to the original Chromium (quiche) are being distributed together.
 
@@ -77,13 +77,7 @@ $ bash send_server.sh "account@ip_address:/path/to/server" "Port"
 If the file transfer is complete, run quic_server.sh on the Linux device. 
 
 ```bash
-$ bash quic_server.sh 0
-```
-
-0 is an option that disables the function of maintaining the initial congestion window after the handover proposed by mQUIC. If changed to 1, this function can be activated
-
-```bash
-$ bash quic_server.sh 1
+$ bash quic_server.sh
 ```
 
 In the "quic_server_data" folder, the "index_dir" directory contains various files of different sizes. To exchange a desired file with the one on "quic.smalldragon.net" and run the server, simply select a file and execute the process.
@@ -107,11 +101,6 @@ default:
   server:
     name: "quic.smalldragon.net"
     host: 0.0.0.0
-  single:
-    ssid1: "ssid1"
-    pass1: "password1"
-    ssid2: "ssid2"
-    pass2: "password2"
 ```
 
 "single" is used to experiment with homogeneous handover using one NIC. With two routers prepared and SSID and password entered, the experiment can be started. Handover will be directly triggered by the client through a thread."
@@ -119,7 +108,7 @@ default:
 quic_cm.sh is a script that runs the client with the connection migration capability by applying mQUIC's handover detection technique. Execute it as follows.
 
 ```bash
-$ bash quic_cm.sh [time | psn] [msec | EA] [number of handover] [start1 | start2 | start3 | start4] [number of requests] [number of testcases]
+$ bash quic_cm.sh [time | psn] [msec | EA] [number of handover] [start1 | start2] [number of requests] [number of testcases]
 ```
 
 **[time | psn]** : time elapsed after requesting the handover occurrence time, or the amount of received packets, to determine the criteria for handover
@@ -128,7 +117,7 @@ $ bash quic_cm.sh [time | psn] [msec | EA] [number of handover] [start1 | start2
 
 **[number of handover]** : This indicates how many times handover will occur. If handover is triggered more than twice, and the option was set to 'time,' it will wait for the delay time after the first handover and then trigger it again. If the option was set to 'psn,' it will trigger handover when the same amount of packets have been received.
 
-**[start1 | start2 | start3 | start4 ]** : The starting point of handover is determined on which interface to start. For 'start1,' it receives data on 'iface1' in 'settings.yaml' and triggers handover to 'iface2,' while for 'start2,' it receives data on 'iface2' and triggers handover to 'iface1.' 'Start3' and 'start4' trigger handover between 'SSID1' and 'SSID2' on a single interface.
+**[start1 | start2 ]** : The starting point of handover is determined on which interface to start. For 'start1,' it receives data on 'iface1' in 'settings.yaml' and triggers handover to 'iface2,' while for 'start2,' it receives data on 'iface2' and triggers handover to 'iface1.'
 
 **[number of requests]** : It determines how many times the client will perform data requests to the server.
 
@@ -150,12 +139,12 @@ The above command triggers handover from 'iface1' to 'iface2' once, 200ms after 
 
 In this testbed, the mQUIC client manipulates the routing table and iptables to simulate handover situations, and the client triggers the handover by executing the change1to2.sh and change2to1.sh files.
 
-change1to2.sh file is used to trigger handover from iface1 to iface2 in settings.yaml, while change2to1.sh is used to trigger handover from iface2 to iface1. By using these files, it is possible to experiment with both heterogeneous and homogeneous handover situations
+change1to2.sh file is used to trigger handover from iface1 to iface2 in settings.yaml, while change2to1.sh is used to trigger handover from iface2 to iface1. By using these files, it is possible to experiment according to L2~L3 handover delay.
 
-Heterogeneous handover can minimize handover delay because it occurs between two NICs. While continuing to receive data from the NIC that was being used before the handover, the new NIC can reduce the latency time by finding a new router and obtaining a new IP address. This situation is implemented using routing tables and iptables as follows.
+cellular to Wi-Fi handover can minimize handover delay because it occurs between two NICs. While continuing to receive data from the NIC that was being used before the handover, the new NIC can reduce the latency time by finding a new router and obtaining a new IP address. This situation is implemented using routing tables and iptables as follows.
 
 ```bash
-# Heterogeneous Handover in change1to2.sh
+# cellular -> Wi-Fi Handover
 sudo iptables -D INPUT -i $iface2_name -j DROP &> /dev/null
 sudo ip addr add $iface2_host/24 dev $iface2_name
 sudo route add default gw $iface2_gateway dev $iface2_name metric $1
@@ -168,19 +157,18 @@ echo "[handover] Release the IP used before handover $iface1_name($iface1_host)"
 
 Although there is a way to bring down the interface using ifconfig, it is not recommended as it causes significant delays due to the need to repeatedly activate and deactivate the interface in repeated experiments.
 
-Homogeneous handover cannot apply the technique mentioned earlier because it uses only one NIC. Therefore, since the handover delay can vary, it is configured to test by handover delay range as shown below. By changing the range, the handover delay range can be changed in units of 100ms.
+Wi-Fi to cellular handover may not apply the technique mentioned above because the handover usually occurs when the mobile client get out of the Wi-Fi range . Since the handover delay can vary in this case, it is configured to test variable handover delay range as shown below. By changing the range, the handover delay range can be changed in units of 100ms.
 
 ```bash
-# Homogeneous Handover in change1to2.sh
+# Wi-Fi -> cellular Handover
 start=`date +%s.%N`
-echo "$[handover] iface1_name($iface1_host) -> $iface2_name($iface2_host)"
+echo "[handover] $iface1_name($iface1_host) -> $iface2_name($iface2_host)"
 
 sudo iptables -A INPUT -i $iface1_name -j DROP &> /dev/null
 sudo ip addr del $iface1_host/24 dev $iface1_name
 echo "[handover] Release the IP used before handover $iface1_name($iface1_host)"
 
-# Random handover delay
-range=2
+range=0
 random_delay=`echo "scale=3; ($(($RANDOM%31))+$range*100)/1000" | bc`
 sleep $random_delay
 
@@ -192,11 +180,10 @@ echo "[handover] Add new IP to use after handover $iface2_name($iface2_host)"
 end=`date +%s.%N`
 diff=$( echo "($end - $start)*1000" | bc -l )
 int=${diff%.*}
-echo "[handover] Handover complete - $int msec"
+echo "[handover] L2~L3 Handover complete - $int msec"
 echo $int >> ac_delay.txt
-```
 
-If you want to perform a real homogeneous handover experiment using only one NIC, you can use the changeSingle.sh by specifying the SSID through the command line using the start3 or start4 option when running the client. changeSingle.sh can perform handover to a router with the specified SSID using the nmcli tool via the command line. However, it is not recommended for repeat experiments because, based on this testbed, it takes about 9-10 seconds to consume the handover delay.
+```
 
 ## Execution
 

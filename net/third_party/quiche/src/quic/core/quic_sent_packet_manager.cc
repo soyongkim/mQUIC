@@ -672,6 +672,8 @@ void QuicSentPacketManager::MarkForRetransmission(
   QUICHE_DCHECK(!transmission_info->has_crypto_handshake ||
                 transmission_type != PROBING_RETRANSMISSION);
 
+
+  //std::cout << "[quic_sent_packet_manager] Mark For Retransmission" << std::endl;
   HandleRetransmission(transmission_type, transmission_info);
 
   // Get the latest transmission_info here as it can be invalidated after
@@ -699,12 +701,23 @@ void QuicSentPacketManager::HandleRetransmission(
     // transmission_info owning these frames may be deallocated after each
     // retransimission. Make a copy of retransmissible frames to prevent the
     // invalidation.
-    //std::cout << "[quic_sent_packet_manager] Retransmit frames!" << std::endl;
+    // std::cout << "[quic_sent_packet_manager] Retransmit frames - ";
+    // for (const auto& frame : transmission_info->retransmittable_frames) {
+    //    std::cout << frame.type << " ";
+    // }
+    // std::cout << std::endl;
+
     unacked_packets_.RetransmitFrames(
         QuicFrames(transmission_info->retransmittable_frames),
         transmission_type);
     return;
   }
+
+  // std::cout << "[quic_sent_packet_manager] NotifyFramesLost frames?? - ";
+  //   for (const auto& frame : transmission_info->retransmittable_frames) {
+  //      std::cout << frame.type << " ";
+  //   }
+  // std::cout << std::endl;
 
   unacked_packets_.NotifyFramesLost(*transmission_info, transmission_type);
   if (transmission_info->retransmittable_frames.empty()) {
@@ -833,11 +846,13 @@ bool QuicSentPacketManager::OnPacketSent(
   QUIC_BUG_IF(quic_bug_10750_2, packet.encrypted_length == 0)
       << "Cannot send empty packets.";
   if (pending_timer_transmission_count_ > 0) {
+    //std::cout << "[quic_sent_packet_manager] sent packet count_ = 0" << std::endl;
     --pending_timer_transmission_count_;
   }
 
   //std::cout << "[quic_sent_packet_manger] on packet sent" << std::endl;
   bool in_flight = has_retransmittable_data == HAS_RETRANSMITTABLE_DATA;
+  //std::cout << "[quic_sent_packet_manger] on packet sent - " << in_flight << std::endl;
   if (ignore_pings_ && mutable_packet->retransmittable_frames.size() == 1 &&
       mutable_packet->retransmittable_frames[0].type == PING_FRAME) {
     // Dot not use PING only packet for RTT measure or congestion control.
@@ -924,7 +939,7 @@ QuicSentPacketManager::OnRetransmissionTimeout() {
       }
       ++consecutive_pto_count_;
       pending_timer_transmission_count_ = max_probe_packets_per_pto_;
-      //std::cout << "[quic_sent_packet_manager] PTO_MODE" << std::endl;
+      //std::cout << "[quic_sent_packet_manager] pending timer count  = max : " << pending_timer_transmission_count_ << std::endl;
       return PTO_MODE;
   }
   QUIC_BUG(quic_bug_10750_3)
@@ -1042,6 +1057,7 @@ void QuicSentPacketManager::RetransmitRtoPackets() {
 
 void QuicSentPacketManager::MaybeSendProbePackets() {
   if (pending_timer_transmission_count_ == 0) {
+    //std::cout << "[quic_sent_packet_manage] probing?? 1" << std::endl;
     return;
   }
   PacketNumberSpace packet_number_space;
@@ -1090,6 +1106,7 @@ void QuicSentPacketManager::MaybeSendProbePackets() {
 void QuicSentPacketManager::AdjustPendingTimerTransmissions() {
   if (pending_timer_transmission_count_ < max_probe_packets_per_pto_) {
     // There are packets sent already, clear credit.
+    //std::cout << "[quic_sent_packet_manager] Adjust : count_ = 0" << std::endl;
     pending_timer_transmission_count_ = 0;
     return;
   }
@@ -1532,27 +1549,27 @@ QuicSentPacketManager::OnConnectionMigration(bool reset_send_algorithm) {
   consecutive_tlp_count_ = 0;
   consecutive_pto_count_ = 0;
 
-  QuicByteCount new_cwnd = kInitialCongestionWindow;
-  if(mquic_cwnd_size != 0 && rtt_stats_.min_rtt() >= pv_rtt_) {
-    double pre = (double)(rtt_stats_.min_rtt().ToMicroseconds() - pv_rtt_.ToMicroseconds())/(double)rtt_stats_.min_rtt().ToMicroseconds();
-    new_cwnd = (pre*send_algorithm_->GetCongestionWindow())/kDefaultTCPMSS;
+  // QuicByteCount new_cwnd = kInitialCongestionWindow;
+  // if(mquic_cwnd_size != 0 && rtt_stats_.min_rtt() >= pv_rtt_) {
+  //   double pre = (double)(rtt_stats_.min_rtt().ToMicroseconds() - pv_rtt_.ToMicroseconds())/(double)rtt_stats_.min_rtt().ToMicroseconds();
+  //   new_cwnd = (pre*send_algorithm_->GetCongestionWindow())/kDefaultTCPMSS;
 
-    new_cwnd = (new_cwnd/mquic_cwnd_size);
-    //std::cout << "[quic_sent_packet_manager] After pre/prewind: " << pre << "/" << pre_cwind << std::endl;
-    new_cwnd = new_cwnd > kInitialCongestionWindow ? new_cwnd : kInitialCongestionWindow;
-    //pre_cwind = pre_cwind > kMaxInitialCongestionWindow ? kMaxInitialCongestionWindow : pre_cwind;
+  //   new_cwnd = (new_cwnd/mquic_cwnd_size);
+  //   //std::cout << "[quic_sent_packet_manager] After pre/prewind: " << pre << "/" << pre_cwind << std::endl;
+  //   new_cwnd = new_cwnd > kInitialCongestionWindow ? new_cwnd : kInitialCongestionWindow;
+  //   //pre_cwind = pre_cwind > kMaxInitialCongestionWindow ? kMaxInitialCongestionWindow : pre_cwind;
 
-    //pre_cwind = 2;
-  }
+  //   //pre_cwind = 2;
+  // }
 
   
-  std::cout << "[quic_sent_packet_manager] RTTold/RTTnew: " << rtt_stats_.min_rtt() << "/" << pv_rtt_ << "   prevCwnd/curCwnd: " << send_algorithm_->GetCongestionWindow()/kDefaultTCPMSS << "/" << new_cwnd << std::endl;
+  // std::cout << "[quic_sent_packet_manager] RTTold/RTTnew: " << rtt_stats_.min_rtt() << "/" << pv_rtt_ << "   prevCwnd/curCwnd: " << send_algorithm_->GetCongestionWindow()/kDefaultTCPMSS << "/" << new_cwnd << std::endl;
 
 
-  std::fstream fwriter;
-  fwriter.open("rtt_cwnd.txt", std::ios::app);
-  fwriter << rtt_stats_.min_rtt().ToMilliseconds() << '\t'  << pv_rtt_.ToMilliseconds()<< '\t' << send_algorithm_->GetCongestionWindow()/kDefaultTCPMSS << '\t' << new_cwnd << std::endl;
-  fwriter.close(); 
+  // std::fstream fwriter;
+  // fwriter.open("rtt_cwnd.txt", std::ios::app);
+  // fwriter << rtt_stats_.min_rtt().ToMilliseconds() << '\t'  << pv_rtt_.ToMilliseconds()<< '\t' << send_algorithm_->GetCongestionWindow()/kDefaultTCPMSS << '\t' << new_cwnd << std::endl;
+  // fwriter.close(); 
 
   rtt_stats_.OnConnectionMigration();
   if (!reset_send_algorithm) {
@@ -1566,7 +1583,7 @@ QuicSentPacketManager::OnConnectionMigration(bool reset_send_algorithm) {
       std::move(send_algorithm_);
   SetSendAlgorithm(old_send_algorithm->GetCongestionControlType());
 
-  send_algorithm_->SetInitialCongestionWindowInPackets(new_cwnd);
+  //send_algorithm_->SetInitialCongestionWindowInPackets(new_cwnd);
 
   // Treat all in flight packets sent to the old peer address as lost and
   // retransmit them.

@@ -113,9 +113,6 @@ int QuicToyServer::Start() {
           quic::QuicIpAddress::Any6(), GetQuicFlag(FLAGS_port)))) {
     return 1;
   }
-
-  std::cout << "[quic_toy_server] mQUIC cwnd : " << GetQuicFlag(FLAGS_mquic_cwnd) << std::endl;
-  server->SetMquicCwnd(GetQuicFlag(FLAGS_mquic_cwnd));
   
   server->HandleEventsForever();
   return 0;
