@@ -10,50 +10,57 @@ The mQUIC(mobile QUIC) is designed with the following key requirements:
 4) Handover support in networks with large handover delay; 
 5) Performing the path validation and connection migration of QUIC with the server by using the new IP address.
 
-The mQUIC implementation was developed based on Chromium (quiche), and both the modified code from Chromium and a shell script file that can apply the code to the original Chromium (quiche) are being distributed together.
+The mQUIC implementation is rooted in the Chromium (quiche). It encompasses both adapted code derived from Chromium and a shell script that facilitates the application of this code onto the original Chromium (quiche). These components are collectively distributed.
 
-Moreover, the mQUIC implementation directly modifies the routing table to simulate handover scenarios. Therefore, to conduct a handover experiment, two NICs are required.
+Furthermore, the mQUIC implementation directly manipulates the routing table to emulate diverse handover scenarios. Thus, the execution of a handover experiment necessitates the presence of two Network Interface Cards (NICs).
 
-It has been confirmed that the mQUIC implementation runs on Ubuntu 20.04.4 LTS, and both the build and distribution are based on Linux.
+This implementation has been validated on Ubuntu 20.04.4 LTS, with both the construction and distribution processes anchored within the Linux ecosystem. By adhering to these guidelines, the mQUIC implementation can be effectively harnessed to achieve seamless handover and connection migration capabilities.
 
 
 
-## Building mQUIC
+## Building mQUIC: Chromium Source Code Integration
 
-To build mQUIC, you need to first obtain the Chromium source code. You can download the Chromium source code through the link below. Due to its considerable size, it is recommended to make extra space in advance.
+To initiate the construction of mQUIC, your first step is to acquire the Chromium source code. Access the Chromium source code by following the link provided below. Given its substantial size, it is advisable to ensure sufficient available storage space beforehand.
 
 - https://chromium.googlesource.com/chromium/src/+/main/docs/linux/build_instructions.md
 
-If you have completed the "Run the hooks" step, depot_tools will be installed and the Chromium code will be downloaded. However, since the Chromium code is continually being modified, building the mQUIC implementation using the latest Chromium code may fail. Therefore, to return to the Chromium version used for mQUIC implementation, revert the code to the following commit point.
+Upon completing the "Run the hooks" stage, the depot_tools will be installed, and the Chromium codebase will be fetched. However, considering the dynamic nature of the Chromium code, building the mQUIC implementation using the latest Chromium code may result in complications. Therefore, to align with the Chromium version compatible with mQUIC, you should revert the code to the specific commit point indicated below.
 
 ```bash
 $ git checkout c91b87056
 $ gclient sync
 ```
 
-If you have successfully rolled back the Chromium code to the corresponding commit point, you can install mQUIC. Go to the "src" folder of the Chromium code and download the mQUIC code.
+Once you have successfully reverted the Chromium codebase to the designated commit point, you can proceed with the installation of mQUIC. Navigate to the "src" directory within the Chromium codebase and clone the mQUIC repository using the following command:
 
 ```bash
 $ cd /path/to/chromium/src
 $ git clone https://github.com/soyongkim/mQUIC.git
 ```
 
-If you download mQUIC, a net folder will exist, which contains modified Chromium codes for mQUIC. To port this code to Chromium code, execute the script below.
+Upon downloading mQUIC, you will find a "net" folder containing customized Chromium code segments tailored for mQUIC. To effectively integrate this code into the Chromium framework, execute the provided script as outlined below:
 
 ```bash
 $ cd mQUIC
 $ bash port_mquic.sh
 ```
 
-After porting the code, a net_backup folder is created, which contains copied original Chromium code. Now, you can build Chromium with mQUIC. If Chromium had been installed, the gn tool would have been installed together. This is a meta-build system for generating ninja build files. First, ninja build files are generated with the gn tool. Then, mQUIC client and server are built with the ninja build tool.
+Following the code porting process, a new directory named "net_backup" will emerge. This directory contains a copy of the original Chromium code. With the code successfully ported, you can now proceed to build Chromium with the integrated mQUIC. Assuming that Chromium and the accompanying gn tool are already installed, you can follow these steps:
+
+1. Generate ninja build files using the gn tool:
 
 ```bash
 $ cd /path/to/chromium/src
 $ gn gen out/Default
+```
+
+2. Build the mQUIC client and server using the ninja build tool:
+
+```bash
 $ ninja -C out/Default epoll_quic_client epoll_quic_server
 ```
 
-If you want to revert back to the original Chromium code, you can execute the rollback.sh script file.
+In the event you wish to revert to the original Chromium codebase, you can accomplish this by executing the provided "rollback.sh" script:
 
 ```bash
 $ bash rollback.sh
@@ -61,32 +68,36 @@ $ bash rollback.sh
 
 
 
-## Run QUIC server
+## Running the QUIC server
 
-To conduct a handover experiment, the server needs to be transferred to a different Linux device. Transferring the server to a desired device can be easily done by running send_server.sh
+For the purpose of conducting a handover experiment, it is essential to migrate the server to a different Linux device. This migration can be conveniently accomplished by executing the "send_server.sh" script.
 
-send_server.sh moves the built mQUIC and necessary files for execution (cert, index files, etc.) and a script file to run the server. Note that if the desired folder name was changed using the -C option during ninja build, it must be changed to that folder name in send_server.sh.
+"send_server.sh" orchestrates the seamless transfer of the compiled mQUIC components, along with the essential execution files such as certificates and index files, in addition to a script to initiate the server. It's important to note that if you had altered the desired folder name using the "-C" option during the ninja build, this change must be accurately reflected in the "send_server.sh" script.
 
-send_server.sh was created based on scp tool. If you want to use a different tool, you can simply check the list of files in send_server.sh and use that tool.
+This script, designed based on the "scp" tool, can be adapted to different tools by simply reviewing the file list within "send_server.sh" and making the necessary adjustments.
+
+Follow these steps to initiate the server transfer and execute the server on the Linux device:
 
 ```bash
 $ cd mQUIC
 $ bash send_server.sh "account@ip_address:/path/to/server" "Port"
 ```
 
-If the file transfer is complete, run quic_server.sh on the Linux device. 
+Once the file transfer is successfully completed, proceed to launch the QUIC server on the Linux device using the following command:
 
 ```bash
 $ bash quic_server.sh
 ```
 
-In the "quic_server_data" folder, the "index_dir" directory contains various files of different sizes. To exchange a desired file with the one on "quic.smalldragon.net" and run the server, simply select a file and execute the process.
+Within the "quic_server_data" directory, you will find the "index_dir" subfolder containing a variety of files with differing sizes. To substitute a desired file with one from "quic.smalldragon.net" and commence the server, simply select the file of interest and initiate the process.
+
+If the desired file size is unavailable, you have the option to generate HTML files using the "html_generator" tool.
 
 
 
-## Run QUIC client
+## Running the QUIC client
 
-Before running the client, prepare two NICs and first confirm that both NICs can use the network. Then record the information for the two NICs you want to use in the settings.yaml file and enter the IP information of the mQUIC server in "server"
+Before initiating the QUIC client, it is essential to prepare two Network Interface Cards (NICs) and confirm their network connectivity. Record the pertinent information for both NICs in the "settings.yaml" file, along with the IP details of the mQUIC server under the "server" section, as shown below:
 
 ```yaml
 default:
@@ -103,45 +114,45 @@ default:
     host: 0.0.0.0
 ```
 
-"single" is used to experiment with homogeneous handover using one NIC. With two routers prepared and SSID and password entered, the experiment can be started. Handover will be directly triggered by the client through a thread."
-
-quic_cm.sh is a script that runs the client with the connection migration capability by applying mQUIC's handover detection technique. Execute it as follows.
+A script named "quic_cm.sh" enables the client to exhibit connection migration capabilities by employing mQUIC's handover detection technique. Execute the script using the following format:
 
 ```bash
 $ bash quic_cm.sh [time | psn] [msec | EA] [number of handover] [start1 | start2] [number of requests] [number of testcases]
 ```
 
-**[time | psn]** : time elapsed after requesting the handover occurrence time, or the amount of received packets, to determine the criteria for handover
+Here's a breakdown of the script's parameters:
 
-**[msec | EA]** : If the previous option was set to 'time,' this value will trigger the handover in milliseconds at that point, and if it was set to 'psn,' the client will trigger the handover after receiving the specified number of packets.
+**[time | psn]**: Specify either elapsed time after requesting the handover occurrence or the number of received packets to determine the handover criteria.
 
-**[number of handover]** : This indicates how many times handover will occur. If handover is triggered more than twice, and the option was set to 'time,' it will wait for the delay time after the first handover and then trigger it again. If the option was set to 'psn,' it will trigger handover when the same amount of packets have been received.
+**[msec | EA]**: If using "time," set the time in milliseconds to trigger handover; if using "psn," trigger handover after receiving a specific number of packets.
 
-**[start1 | start2 ]** : The starting point of handover is determined on which interface to start. For 'start1,' it receives data on 'iface1' in 'settings.yaml' and triggers handover to 'iface2,' while for 'start2,' it receives data on 'iface2' and triggers handover to 'iface1.'
+**[number of handover]**: Indicate the desired count of handovers. For more than two handovers triggered by "time," it waits for a delay after the initial handover before triggering subsequent ones. If using "psn," handover is triggered once the specified number of packets are received.
 
-**[number of requests]** : It determines how many times the client will perform data requests to the server.
+**[start1 | start2]**: Designate the starting interface for handover initiation: "start1" transfers data from 'iface1' to 'iface2,' while "start2" performs the reverse.
 
-**[number of testcases]** : It determines how many times to execute this script.
+**[number of requests]**: Define the number of data requests the client will make to the server.
 
-It can be used as an example like the following.
+**[number of testcases]**: Determine the number of times to execute the script.
+
+For instance, to exemplify the usage:
 
 ```bash
 $ bash quic_cm.sh time 200 1 start1 1 1
 ```
 
-The above command triggers handover from 'iface1' to 'iface2' once, 200ms after the data request. The script will be executed once for a total of one request. 
+This command triggers a single handover from 'iface1' to 'iface2' 200ms after a data request. The script executes once, involving a single request.
 
-'quic_nc.sh' shows how handover is handled by establishing a new connection when triggered, without applying mQUIC techniques. Usage is the same as 'quic_cm.sh'
+An analogous script, "quic_nc.sh," showcases handover handling by establishing a new connection without employing mQUIC techniques. Usage mirrors that of "quic_cm.sh."
 
 
 
-## Handover Simulate
+## Simulating Handover Scenarios
 
-In this testbed, the mQUIC client manipulates the routing table and iptables to simulate handover situations, and the client triggers the handover by executing the change1to2.sh and change2to1.sh files.
+In this testbed environment, the mQUIC client orchestrates the manipulation of the routing table, enabling the simulation of diverse handover scenarios. The client initiates handovers by executing the "change1to2.sh" and "change2to1.sh" files.
 
-change1to2.sh file is used to trigger handover from iface1 to iface2 in settings.yaml, while change2to1.sh is used to trigger handover from iface2 to iface1. By using these files, it is possible to experiment according to L2~L3 handover delay.
+The "change1to2.sh" script facilitates the triggering of a handover from "iface1" to "iface2," as defined in the "settings.yaml" configuration. Similarly, the "change2to1.sh" script triggers handover in the reverse direction, offering the flexibility to experiment and assess Layer 2 to Layer 3 (L2~L3) handover delays.
 
-cellular to Wi-Fi handover can minimize handover delay because it occurs between two NICs. While continuing to receive data from the NIC that was being used before the handover, the new NIC can reduce the latency time by finding a new router and obtaining a new IP address. This situation is implemented using routing tables and iptables as follows.
+Cellular to Wi-Fi handover holds the potential to minimize transition delays, as it unfolds between two Network Interface Cards (NICs). This process maintains data reception from the NIC employed before the handover, while the new NIC reduces latency by identifying a fresh router and obtaining a new IP address. This mechanism is accomplished through the manipulation of routing tables and iptables, as illustrated below:
 
 ```bash
 # cellular -> Wi-Fi Handover
@@ -155,9 +166,9 @@ sudo ip addr del $iface1_host/24 dev $iface1_name
 echo "[handover] Release the IP used before handover $iface1_name($iface1_host)"
 ```
 
-Although there is a way to bring down the interface using ifconfig, it is not recommended as it causes significant delays due to the need to repeatedly activate and deactivate the interface in repeated experiments.
+It is important to note that using the "ifconfig" command to bring down an interface is not advisable due to its potential to introduce significant delays resulting from repeated activation and deactivation during experiments.
 
-Wi-Fi to cellular handover may not apply the technique mentioned above because the handover usually occurs when the mobile client get out of the Wi-Fi range . Since the handover delay can vary in this case, it is configured to test variable handover delay range as shown below. By changing the range, the handover delay range can be changed in units of 100ms.
+On the other hand, the Wi-Fi to cellular handover scenario may not adhere to the aforementioned technique. This type of handover typically occurs when the mobile client moves out of Wi-Fi range. Given the varying nature of handover delays in this context, the setup is configured to test a range of delay values, as depicted below:
 
 ```bash
 # Wi-Fi -> cellular Handover
@@ -185,8 +196,10 @@ echo $int >> ac_delay.txt
 
 ```
 
+
+
 ## Execution
 
-After performing the above steps, you can see that the system behaves as shown in the following figure.
+Upon completing the preceding steps, you will witness the system's behavior, aligned with the depiction illustrated in the subsequent figure:
 
 ![mquic_client](./.assets/mquic_client.gif)
